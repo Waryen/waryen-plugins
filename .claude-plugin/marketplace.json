@@ -1,0 +1,13 @@
+{
+  "name": "waryen-plugins",
+  "owner": {
+    "name": "Jonathan Gomand"
+  },
+  "plugins": [
+    {
+      "name": "obsidian-claude",
+      "source": "./plugins/obsidian-claude",
+      "description": "Set up Claude Code for an Obsidian vault"
+    }
+  ]
+}
