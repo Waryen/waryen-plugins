@@ -23,7 +23,7 @@ This file is the operating contract for Claude Code acting as wiki maintainer. R
 
 **Rules:**
 
-- `raw/` is read-only. Never create, edit, or delete files there.
+- `raw/` is read-only. Never create, edit, or delete files there — **except** that the ingest workflow must delete the source file from `raw/` as its final step, after all wiki writes and the log entry are complete.
 - Everything in `wiki/` is LLM-owned. Maintain it aggressively.
 - `index.md` and `log.md` are updated on every operation (ingest, query-that-produces-a-page, lint).
 - `CLAUDE.md` is co-evolved with the user. Update it when conventions change.
@@ -88,7 +88,7 @@ Free-form synthesis. Can include tables, comparisons, timelines. Link heavily to
 
 ### Overview — `wiki/overview.md`
 
-No frontmatter constraints. The living synthesis of everything in the wiki: major themes, key players, open questions, where the field is moving. Updated on every 5th ingest or whenever the user asks. Should always be readable as a standalone document.
+No frontmatter constraints. The living synthesis of everything in the wiki: major themes, key players, open questions, where the field is moving. Updated on every ingest (lightweight touch: add bullets or update relevant sections) and on explicit user request (full rewrite). Should always be readable as a standalone document.
 
 ---
 
@@ -105,12 +105,13 @@ Triggered when user drops a file in `raw/` or pastes content and says "ingest".
 3. **Write** `wiki/sources/<slug>.md` (slug = kebab-case title, max 6 words).
 4. **Update or create** entity pages for every named company, person, product, or project mentioned significantly.
 5. **Update or create** concept pages for every technology or idea that is meaningfully discussed.
-6. **Update** `wiki/overview.md` if the source materially changes the big picture.
+6. **Update** `wiki/overview.md`: add bullets or update relevant sections to reflect this source. Always do this — do not skip. Full rewrites only on explicit user request.
 7. **Append** to `log.md`: `## [YYYY-MM-DD] ingest | <source title>`
 8. **Update** `index.md`: add the source page; update any entity/concept entries that changed.
-9. **Report** to user: list every file touched with a one-line summary of what changed.
+9. **Delete** the source file at the path provided in step 1 from `raw/`.
+10. **Report** to user: list every file touched with a one-line summary of what changed.
 
-**Rule:** Never skip steps 7 and 8. Even small ingests update the log and index.
+**Rule:** Never skip steps 7, 8, and 9. Even small ingests update the log, index, and remove the source file.
 
 ### QUERY
 
@@ -207,7 +208,7 @@ Never edit past entries. Only append.
 - Do not let `index.md` lag behind. Every file write is followed by an index update in the same operation.
 - Do not write walls of text on entity pages. Bullets and sections. Scannable.
 - Do not hallucinate claims not in the sources. If uncertain, flag with `> **Note:** needs verification`.
-- Do not modify `raw/` files.
+- Do not modify `raw/` files. Deletion of the source file after ingest is the only permitted `raw/` operation.
 
 ---
 

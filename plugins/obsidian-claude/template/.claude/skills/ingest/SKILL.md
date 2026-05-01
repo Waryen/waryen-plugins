@@ -12,6 +12,8 @@ Steps:
 2. Discuss 2-5 key takeaways with the user.
 3. Create `wiki/sources/YYYY-MM-DD-slug.md` with summary, key claims, entities, concepts, quotes.
 4. Create/update entity and concept pages for each mentioned; flag contradictions with `> [!warning]`.
-5. Update `index.md`.
-6. Append an entry to `log.md`.
-7. Report created/updated pages, contradictions, and open questions.
+5. Update `wiki/overview.md`: add bullets or update relevant sections. Always — do not skip.
+6. Update `index.md`.
+7. Append an entry to `log.md`.
+8. Delete the source file at $ARGUMENTS from `raw/`.
+9. Report created/updated pages, contradictions, and open questions.
