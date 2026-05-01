@@ -1,7 +1,7 @@
 {
   "name": "obsidian-claude",
   "description": "Set up Claude Code for an Obsidian vault",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "author": {
     "name": "Jonathan Gomand"
   }
