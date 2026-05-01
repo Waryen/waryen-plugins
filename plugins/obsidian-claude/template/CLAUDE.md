@@ -151,9 +151,11 @@ When user provides a URL to fetch:
 
 ## Cross-reference conventions
 
-- Always use Obsidian wikilinks: `[[PageTitle]]` or `[[path/to/page|Display Text]]`.
-- Entity and concept pages use the page title exactly as the link target.
-- Source pages are linked as `[[sources/slug]]` or `[[sources/slug|Article Title]]`.
+- Always use Obsidian wikilinks with explicit paths: `[[path/to/page|Display Text]]`.
+- **Never use bare title links** (`[[John Doe]]`). Obsidian resolves wikilinks by filename, not frontmatter title, so bare titles break if the filename is kebab-cased.
+- Entity pages are linked as `[[entities/slug|Entity Name]]` (e.g., `[[entities/john-doe|John Doe]]`).
+- Concept pages are linked as `[[concepts/slug|Concept Name]]` (e.g., `[[concepts/concept-name|Concept Name]]`).
+- Source pages are linked as `[[sources/slug|Article Title]]` (e.g., `[[sources/2026-04-30-article-title|Article Title]]`).
 - Every entity/concept page must have at least one inbound link from a source page.
 - When updating an entity page after a new ingest, add the new source to its `## Sources` section.
 
