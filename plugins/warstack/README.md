@@ -1,6 +1,6 @@
 # warstack
 
-Give warstack a task and it drives it end to end on its own. A code change gets implemented, reviewed in a fresh context, tested headless, and opened as a draft PR. A question or an analysis ends in a cited answer or report. It asks its questions once, at the start. Run one task per session, and as many sessions in parallel as you like.
+Give warstack a task and it drives it end to end on its own. A code change gets implemented, reviewed in a fresh context, tested headless, and opened as a draft PR. A question or an analysis ends in a cited answer or report. It asks its questions once, at the start. Run one task per session, as many sessions in parallel as you like, or hand it a queue of tasks with `/warstack:afk` and walk away.
 
 ```
 /warstack:auto PROJ-1234 --target develop
@@ -11,6 +11,7 @@ Give warstack a task and it drives it end to end on its own. A code change gets 
 | Command | What it does | Runs in |
 |---|---|---|
 | `/warstack:auto <task> [--target <branch>] [--playbook <name>] [--repo <path>…] [--problem]` | The whole run: intake, playbook, loop, draft PR or report, record. `<task>` is one or more Jira keys, a PR URL, or a quoted description. `--target` sets the primary repo's PR target. `/warstack:auto <run-id> [guidance]` resumes a run. | your session |
+| `/warstack:afk <task> [; <task>…] [--hours <n>]` | For when you are away: asks every task's intake questions now, then runs the tasks one after another, headless, in a detached driver. | your session, then a driver |
 | `/warstack:implement` | Implement a plan or fix findings, then commit. | fresh subagent |
 | `/warstack:review` | Read-only review against the task and a fixed rubric. | fresh subagent |
 | `/warstack:testing` | Static checks, unit tests and headless e2e for web, mobile or API. | fresh subagent |
@@ -48,6 +49,7 @@ runs/<run-id>/     state, task, plan, decision log, audit log, iterations, evide
 repos/<repo>/      what it learned per repo: commands, launch recipe, features, its e2e harness
 history.md         one line per finished run
 locks/             one per simulator or emulator in use
+afk/<yyyymmdd-hhmm>/  one per afk queue: queue, driver pid, timeline, each run's session output
 ```
 
 There is nothing to set up. Each warstack skill pre-approves reading its own files, and reading and writing `~/.warstack`, for the turn it runs in. A message you send mid-run ends that grant until the next warstack command.
@@ -59,6 +61,19 @@ In your repos it writes only three things: its worktrees under `.claude/worktree
 - Start one session per task: from agent view (`claude agents`), from separate terminals, or with `claude --bg "/warstack:auto PROJ-1234 --target develop"`.
 - Background and `-p` runs can't ask intake questions. Pass `--target` (and `--playbook` if you want), or the run parks and says what it needs.
 - `/warstack:status` shows every run from any session.
+
+## While you are away
+
+```
+/warstack:afk PROJ-1234 --target develop ; PROJ-1240 ; "bump the lodash version" --at ~/Code/api --hours 8
+```
+
+- It runs every task's intake now and asks all the questions in one batch, so nothing parks in the night for want of an answer.
+- It settles what a headless run cannot: the `.git/info/exclude` line per repo, `gh` and Atlassian access, and the commands no allow rule covers.
+- A detached driver (`skills/afk/afk.sh`) then runs each task with `claude -p "/warstack:auto …" --permission-mode auto`, one at a time. It keeps a Mac awake with `caffeinate -i`: plug it in, since a closed lid on battery still sleeps. You can close the session.
+- A session that dies is resumed, up to 3 times per run. A usage limit is waited out. No run starts after `--hours` (default 10).
+- Back at the keyboard: `/warstack:status`, and `~/.warstack/afk/<yyyymmdd-hhmm>/afk.log` for the night's timeline. To stop it early, `kill` the pid in that folder.
+- `sh skills/afk/afk-test.sh` tests the driver against a fake `claude`.
 
 ## Several repos in one task
 

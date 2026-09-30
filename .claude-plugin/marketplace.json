@@ -13,7 +13,7 @@
     {
       "name": "warstack",
       "source": "./plugins/warstack",
-      "description": "Drive a task end to end: implement, review, test, draft PR"
+      "description": "Drive tasks end to end, alone or queued while you are away: implement, review, test, draft PR"
     }
   ]
 }

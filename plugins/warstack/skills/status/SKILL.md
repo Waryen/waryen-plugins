@@ -15,7 +15,7 @@ Stay read-only unless the user asked for `--cleanup`. The layout is in `${CLAUDE
 
 Read only the front matter of `~/.warstack/runs/*/state.md` and `~/.warstack/repos/*/profile.md`, not their bodies. Report these sections, and leave out the empty ones:
 
-1. **Needs you**: `stopped` and `parked` runs, each with its reason and resume command, both taken from the Outcome section of its `report.md`.
+1. **Needs you**: `stopped` and `parked` runs, each with its reason and resume command, both taken from the Outcome section of its `report.md`. A `parked` run in the `queue.tsv` of an afk folder (`~/.warstack/afk/*/`) whose driver still runs (`kill -0 $(cat <folder>/pid)` succeeds) is not waiting on the user: list it under **Queued** instead, with its folder.
 2. **Running**: run id, playbook, `iteration`/`budget`, and the time since `updated`. After 6 hours with no update, mark it "possibly abandoned".
 3. **Finished**: the last 10 lines of `history.md`.
 4. **Repos**: per repo, `e2e`, `recipe_proven`, `ci`, and each open recommendation (e.g. "ship the warstack harness to the repo").
