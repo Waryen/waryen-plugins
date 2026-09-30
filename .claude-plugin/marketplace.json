@@ -8,6 +8,11 @@
       "name": "obsidian-claude",
       "source": "./plugins/obsidian-claude",
       "description": "Set up Claude Code for an Obsidian vault"
+    },
+    {
+      "name": "warstack",
+      "source": "./plugins/warstack",
+      "description": "Drive a task end to end: implement, review, test, draft PR"
     }
   ]
 }

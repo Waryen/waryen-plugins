@@ -21,3 +21,4 @@ Then install any plugin:
 | Plugin                                         | Description                              |
 | ---------------------------------------------- | ---------------------------------------- |
 | [`obsidian-claude`](./plugins/obsidian-claude) | Set up Claude Code for an Obsidian vault |
+| [`warstack`](./plugins/warstack) | Drive a task end to end: implement, review, test, draft PR |
