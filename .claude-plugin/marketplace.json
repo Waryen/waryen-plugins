@@ -1,5 +1,6 @@
 {
   "name": "waryen-plugins",
+  "description": "Personal Claude Code plugins marketplace",
   "owner": {
     "name": "Jonathan Gomand"
   },
