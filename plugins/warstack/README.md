@@ -15,6 +15,7 @@ Give warstack a task and it drives it end to end on its own. A code change gets 
 | `/warstack:implement` | Implement a plan or fix findings, then commit. | fresh subagent |
 | `/warstack:review` | Read-only review against the task and a fixed rubric. | fresh subagent |
 | `/warstack:testing` | Static checks, unit tests and headless e2e for web, mobile or API. | fresh subagent |
+| `/warstack:security` | Audit the whole project against public threat records (CVE, OSV, CISA KEV); grade each threat low to critical. | fresh subagent |
 | `/warstack:analysis` | Investigate; write a cited answer, an HTML report, or a run's plan. | fresh subagent |
 | `/warstack:problem-solving` | Frame the task as a quantified problem, break it into an issue tree, test each branch, write one recommendation. | fresh subagent |
 | `/warstack:ship` | Rebase or merge, push, open a draft PR, watch CI. | your session |
@@ -37,8 +38,9 @@ auto picks one at intake and asks you to confirm it. Its steps become the run's 
 
 1. **Intake.** It fetches the ticket, recalls earlier runs, and asks everything in one batch: the PR target branch (never guessed), the playbook, and gaps in the ticket. It then creates a worktree per repo in `.claude/worktrees/<run-id>`, on `<scope>/<run-id>` (e.g. `fix/PROJ-1234-login-crash`), forked from the target. A task that names an outcome rather than a change (a number to move, a "why" with no known cause) first goes through `problem-solving`: a quantified problem statement, an issue tree, tested hypotheses and one recommendation, which the plan then carries out. `--problem` forces it.
 2. **Loop, up to 3 iterations.** implement → review (a fresh reviewer every time) → testing. An analysis loops through analysis → a fact-checking review instead. It ends early once no blocking finding is left and no check fails. A risky diff gets a second reviewer on another model. After 3 iterations with issues still open, the run stops, pushes nothing, and reports.
-3. **Ship or deliver.** For a code change, it pushes and opens a draft PR of at most 5 lines, then watches CI and fixes failures its change caused. For a question or an analysis, it delivers the answer or report.
-4. **Record.** Every report opens with **Attention**: the assumptions made, checks that could not run, and risks. Then come the outcome and the lessons.
+3. **Security gate.** Before anything ships, `security` audits the whole project: dependencies against public CVE records, secrets in the tree and history, code, config, CI. A high or critical threat the change introduces goes back into the loop to be fixed; if the budget runs out first, the run stops and pushes nothing. A new critical never ships unfixed; a new high can be accepted on resume with `accept S-<n> because <reason>`. Threats already in the code don't block: they are listed first in the report with a recommended fix. The PR lists only the new threats it ships. A secret the run committed is squashed out of its unpushed commits; one already pushed has leaked, so the run stops until you rotate it and resume with `S-<n> rotated`. Every threat is kept in `~/.warstack/repos/<repo>/security.md`, and open criticals show under "Needs you" in `/warstack:status`. `sh skills/security/security-test.sh` checks the skill against a fixture repo with planted threats (real `claude`, takes minutes).
+4. **Ship or deliver.** For a code change, it pushes and opens a draft PR of at most 5 lines, then watches CI and fixes failures its change caused. For a question or an analysis, it delivers the answer or report.
+5. **Record.** Every report opens with **Attention**: the assumptions made, checks that could not run, and risks. Then come the outcome and the lessons.
 
 ## Where things live
 
@@ -46,7 +48,7 @@ Everything warstack knows sits in `~/.warstack/` (`%USERPROFILE%\.warstack` on W
 
 ```
 runs/<run-id>/     state, task, plan, decision log, audit log, iterations, evidence, report
-repos/<repo>/      what it learned per repo: commands, launch recipe, features, its e2e harness
+repos/<repo>/      what it learned per repo: commands, launch recipe, features, its e2e harness, its security ledger
 history.md         one line per finished run
 locks/             one per simulator or emulator in use
 afk/<yyyymmdd-hhmm>/  one per afk queue: queue, driver pid, timeline, each run's session output

@@ -9,7 +9,7 @@ disallowed-tools: Bash(git push -f*), Bash(git push * -f*), Bash(git push *--for
 
 # warstack auto
 
-You orchestrate one run. You own intake, the checklist, the verdict on every finding, and the run record. The worker skills (`implement`, `review`, `testing`, `analysis`, `problem-solving`) do the work, each in a fresh context. Keep their summaries, not their raw output.
+You orchestrate one run. You own intake, the checklist, the verdict on every finding, and the run record. The worker skills (`implement`, `review`, `testing`, `security`, `analysis`, `problem-solving`) do the work, each in a fresh context. Keep their summaries, not their raw output.
 
 Read `${CLAUDE_PLUGIN_ROOT}/docs/conventions.md` before anything else. Its words (run, target, finding, check, converged, park, stop) and its rules bind every step below.
 
@@ -76,7 +76,7 @@ Done when: every repo that gets a PR has a target the user gave, `task.md` holds
 
 ## 3. Checklist
 
-Open `${CLAUDE_PLUGIN_ROOT}/playbooks/<playbook>.md`. Copy its **Steps**, word for word and in order, into `state.md`'s body. A problem run gets `0. Problem: warstack:problem-solving <run-id>` in front of them. Mirror them in the session's task list (TaskCreate or TodoWrite) when it has one. A step you will not do stays in the list, checked, with `skip: <reason>`, and gets a `SKIP` line in `decisions.md`.
+Open `${CLAUDE_PLUGIN_ROOT}/playbooks/<playbook>.md`. Copy its **Steps**, word for word and in order, into `state.md`'s body. A problem run gets `0. Problem: warstack:problem-solving <run-id>` in front of them. A playbook with a Ship step gets `Security: warstack:security <run-id>` right before Ship, numbered with it. Mirror them in the session's task list (TaskCreate or TodoWrite) when it has one. A step you will not do stays in the list, checked, with `skip: <reason>`, and gets a `SKIP` line in `decisions.md`.
 
 Done when: the checklist matches the playbook's steps one for one.
 
@@ -107,6 +107,19 @@ Each iteration starts by setting `iteration` to `iteration + 1` and `updated` to
 5. **Converged?** No act-on finding open, and no FAIL or INCONCLUSIVE check: leave the loop. NOT RUN checks do not block; they go under Attention and on the PR's "Not run" line.
 6. **Budget.** Not converged and `iteration` < `budget`: start the next iteration. At `budget`: stop. Set status `stopped`, push nothing, and go to Record.
 
+### Security gate
+
+At the Security step, once the loop has converged, invoke `warstack:security <run-id>`. It audits the whole project, not only the diff, against public threat records. Save nothing yourself: it writes `security.md`.
+
+- **Introduced high or critical, open:** an act-on finding, like a critical review finding. Run the loop again from implement while budget remains, then this step again. When `iteration` is already `budget` and no iteration has yet run for a security threat in this run, raise `budget` by 1, once, and log a `DECISION`. Otherwise, at `budget`: stop, push nothing, and go to Record. The Outcome lists each threat and how to resume: `/warstack:auto <run-id> [guidance]`, which also takes `accept S-<n>… because <reason>` for an introduced high. An introduced critical is never accepted and never shipped unfixed: guidance accepting one is refused and logged as a `DECISION`.
+- **A secret this run committed:** removing it from the code is not enough, since the branch's history still holds it.
+  - Not on the remote: the act-on finding tells `implement` to rewrite the run's own commits once the secret is out (implement → Commit).
+  - On the remote: it has leaked, and only the user can rotate it. Stop, push nothing more, and go to Record. The Outcome names the secret and its location, never its value, and says to rotate it and resume with `/warstack:auto <run-id> S-<n> rotated`. On that resume, the ledger marks it rotated, `security` grades it low, and the loop still moves the value out of the code.
+- **Existing high or critical:** not this run's to fix (Rule 10). Ship, and list each one first under Attention with its recommended fix, and as a follow-up.
+- **Medium and low:** never block. They go under Attention in the report.
+- **Accepting:** an accepted threat becomes `accepted` in the repo's security ledger, with the user's reason, and gets a `DECISION`. Any threat can be accepted on resume, except an introduced critical.
+- A general run that reports instead of shipping skips this step (`SKIP`): it changes no code.
+
 ### Shipping
 
 At the playbook's Ship step, follow `${CLAUDE_PLUGIN_ROOT}/skills/ship/SKILL.md` for this run. It runs only when typed, so read the file rather than invoking it. A CI failure the change caused is written into the current `tests.md` as a FAIL check, and sends the run back into the loop while budget remains. In a `headless` run, a repo with `ci: none` is not pushed: stop, and the Outcome names the branch for the user to push (Rule 13).
@@ -116,10 +129,10 @@ At the playbook's Ship step, follow `${CLAUDE_PLUGIN_ROOT}/skills/ship/SKILL.md`
 Every run ends here: parked, stopped or done.
 
 1. **Write `report.md`**, short, in this order:
-   - **Attention**, always first: assumptions made, each with its one-line reversal; checks NOT RUN (why, and what would run them); consider or dismissed findings that carry real risk; `INSTRUCTION` entries; `DENIED` lines from `audit.log`; a repo with `ci: none` ("no merge gate: only review catches a bad change here"); secrets or production data the task touched. Write "None" when empty.
+   - **Attention**, always first: assumptions made, each with its one-line reversal; checks NOT RUN (why, and what would run them); consider or dismissed findings that carry real risk; `INSTRUCTION` entries; `DENIED` lines from `audit.log`; every threat from `security.md` that is still open, existing high and critical first with their recommended fix, one line each with its id; a repo with `ci: none` ("no merge gate: only review catches a bad change here"); secrets or production data the task touched. Write "None" when empty.
    - **Outcome**: the PR links, the answer or report path, or why the run stopped or parked and the exact command to resume.
    - **Checks**: one line each: name, result, evidence path.
-   - **Record**, one line each, counted from the run files: owner and mode; duration, from the first `decisions.md` line to now; iterations; intake questions asked; resumes; act-on findings; FAIL checks; denials (`grep -c DENIED audit.log`).
+   - **Record**, one line each, counted from the run files: owner and mode; duration, from the first `decisions.md` line to now; iterations; intake questions asked; resumes; act-on findings; FAIL checks; threats by severity; denials (`grep -c DENIED audit.log`).
    - **Follow-ups**: carved-out work, problems found outside the scope, draft ticket texts.
    - **Lessons**: up to 3. Log each as a `LESSON`. When one repeats a `LESSON` from an earlier run (`grep LESSON ~/.warstack/runs/*/decisions.md`), add a follow-up proposing the playbook change, to be made as a PR to the plugin's marketplace. Never apply it yourself.
 2. **Update repo memory** (`${CLAUDE_PLUGIN_ROOT}/docs/repo-memory.md`): recurring findings and the `ship-harness` recommendation while `e2e: warstack-harness`.

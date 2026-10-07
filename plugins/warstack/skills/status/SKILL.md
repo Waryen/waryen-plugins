@@ -15,10 +15,10 @@ Stay read-only unless the user asked for `--cleanup`. The layout is in `${CLAUDE
 
 Read only the front matter of `~/.warstack/runs/*/state.md` and `~/.warstack/repos/*/profile.md`, not their bodies. Report these sections, and leave out the empty ones:
 
-1. **Needs you**: `stopped` and `parked` runs, each with its reason and resume command, both taken from the Outcome section of its `report.md`. A `parked` run in the `queue.tsv` of an afk folder (`~/.warstack/afk/*/`) whose driver still runs (`kill -0 $(cat <folder>/pid)` succeeds) is not waiting on the user: list it under **Queued** instead, with its folder.
+1. **Needs you**: `stopped` and `parked` runs, each with its reason and resume command, both taken from the Outcome section of its `report.md`. A `parked` run in the `queue.tsv` of an afk folder (`~/.warstack/afk/*/`) whose driver still runs (`kill -0 $(cat <folder>/pid)` succeeds) is not waiting on the user: list it under **Queued** instead, with its folder. Also list every open critical threat in the repo ledgers (`grep -A1 '\[critical\].* — open$' ~/.warstack/repos/*/security.md`), with its repo, title and first-seen run: nothing else makes anyone fix them.
 2. **Running**: run id, playbook, `iteration`/`budget`, and the time since `updated`. After 6 hours with no update, mark it "possibly abandoned".
 3. **Finished**: the last 10 lines of `history.md`.
-4. **Repos**: per repo, `e2e`, `recipe_proven`, `ci`, and each open recommendation (e.g. "ship the warstack harness to the repo").
+4. **Repos**: per repo, `e2e`, `recipe_proven`, `ci`, each open recommendation (e.g. "ship the warstack harness to the repo"), and its open threats by severity from `security.md` (`grep -c '\[<severity>\].* — open$'`).
 5. **Harness**: what runs attempted and what the guard caught, across `~/.warstack/runs/*/audit.log`. Total calls: `cat <files> | grep -vc DENIED`. Denials by rule: `grep -h DENIED <files> | awk -F' · ' '{print $4}' | sort | uniq -c`. Then the last 5 `DENIED` lines, each with its run id.
 
 ## One run or one repo

@@ -39,6 +39,7 @@ You change code and commit it. Pushing belongs to `ship`. Read `${CLAUDE_PLUGIN_
    - **Bug fixes**: fix at the root cause `plan.md` names, and check every caller of the function you change.
 4. **Commit** each coherent unit.
    - Stage explicit paths.
+   - An act-on finding for a secret this run committed, not yet on the remote: once the value is out of the code, rewrite the run's commits into one so no commit holds it: `git reset --soft <base>` (or `git merge-base HEAD origin/<target>` when `base` is empty), then commit. Check with `git log -p <base>..HEAD` that the value is gone.
    - Message: `<scope>(<KEY>): <what, present tense>`, or the repo's own format when its hooks or docs define one.
    - Hooks run.
    - A test goes in the same commit as the fix it proves, so every commit stays green. The saved red output proves the test failed first.

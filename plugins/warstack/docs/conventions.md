@@ -16,6 +16,7 @@ Shared by every warstack skill and playbook. `<TS>` means `~/.warstack`, warstac
 | iteration | One pass of implement → review → testing. |
 | finding | A review result, `I<iteration>-<n>`, severity `critical`, `warning` or `nit`. |
 | act on · consider · dismissed | auto's verdict on a finding. Only act on blocks. |
+| threat | A security result, `S-<n>` (stable per repo), severity `critical`, `high`, `medium` or `low`. An open high or critical the run introduced is an act-on finding and never ships unfixed (a high may be accepted by the user); an existing one is reported with a recommendation. |
 | check | One testing result: `PASS`, `FAIL`, `INCONCLUSIVE` (counts as FAIL) or `NOT RUN` (with the reason and what would run it). |
 | converged | No act-on finding open, and no FAIL or INCONCLUSIVE check. |
 | park | End a run at intake: only the user can supply what is missing. |
@@ -34,6 +35,7 @@ Shared by every warstack skill and playbook. `<TS>` means `~/.warstack`, warstac
 ├── decisions.md    append-only log, including every intake answer
 ├── audit.log       written by the guard: every command, write and MCP call, and each denial (below)
 ├── iterations/<n>/ implement.md · review.md · tests.md (repro: iterations/0/)
+├── security.md     written by security: verdict, threats by severity, coverage
 ├── evidence/<n>/   screenshots, recordings, logs, command output
 └── report.md       the final report (analysis also answer.md or report.html)
 ```

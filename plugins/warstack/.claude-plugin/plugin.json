@@ -1,7 +1,7 @@
 {
   "name": "warstack",
   "description": "Drive a task end to end on its own, or queue several to run unattended while you are away. Code changes go through implement, fresh-context review and headless e2e tests, then a draft PR; questions and analyses end in a cited answer or report. Playbooks for bug fixes, features, analyses and general tasks.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": {
     "name": "Jonathan Gomand"
   }

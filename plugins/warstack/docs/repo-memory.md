@@ -5,6 +5,7 @@ What warstack knows about a repo lives in `~/.warstack/repos/<repo-key>/`, never
 ```
 repos/<repo-key>/
 ├── profile.md
+├── security.md
 ├── features/<feature>.md
 └── e2e/
 ```
@@ -37,6 +38,19 @@ Body sections, each a few bullets, each fact proven by a run (cite its run id):
 - **Combined runs**: per other repo this one works with, how to connect the two locally for a combined e2e check (a `file:` or yalc dependency, Metro `watchFolders`, local Pods or Gradle paths, an env var pointing at a local API).
 - **Quirks**: gotchas that cost a run time, including files a build rewrites.
 - **Recurring findings**: review findings seen in two or more runs here. `review` checks each change against them.
+
+## security.md
+
+The threat ledger, kept by `security`. One entry per threat ever found, never deleted:
+
+```markdown
+### S-3 [medium] Permissive CORS on /api — open
+First seen: <run-id> · Last checked: <run-id> · Location: src/server.ts:42 · Refs: <CVE/GHSA/OSV ids>
+Accepted: <the user's reason, and the run it was given in> (accepted and rotated only)
+Fixed: <run-id and evidence> (fixed only)
+```
+
+Status is `open`, `accepted`, `rotated` (a leaked secret the user has rotated) or `fixed`. Only the user accepts a threat, through `/warstack:auto <run-id> accept S-<n>`, at any severity except a critical a run introduced: that one is always fixed before it ships. `security` reopens a fixed threat when it comes back, and an accepted one when its severity rises.
 
 ## features/<feature>.md
 

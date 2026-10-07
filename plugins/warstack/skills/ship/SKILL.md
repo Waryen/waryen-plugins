@@ -46,7 +46,7 @@ When repos depend on each other, ship the one others depend on first.
    Tested: <what ran>. Not run: <check> (<why>).
    ```
 
-   - Add a line `Assumption: <x>` or `Merge after: <PR link>` only when one applies, and cut bullets to stay within 5 lines.
+   - Add a line `Assumption: <x>`, `Merge after: <PR link>`, or `Security: <S-id severity title>, …` (the `introduced` threats this PR ships: accepted highs, and open mediums and lows; ids and titles only, no exploit detail) only when one applies, and cut bullets to stay within 5 lines.
    - Leave out warstack, iterations, reviewers, run ids and local paths.
    - Multi-repo: once every PR exists, add each one's `Merge after:` line (`updateBitbucketRepoPullRequest`, or `gh pr edit`).
 5. **CI.** Use the CI named in repo memory (`ci:` in `profile.md`). If it is unknown, look for the pipeline the push started:
