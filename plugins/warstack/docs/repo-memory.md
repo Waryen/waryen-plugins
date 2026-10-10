@@ -21,7 +21,7 @@ checkouts: [/Users/me/Code/webapp]
 kind: web            # web | mobile | api | library | cli | mixed
 e2e: none            # own-suite | warstack-harness | none
 recipe_proven: ""    # date Launch → Evidence → Cleanup last ran end to end
-ci: unknown          # bitbucket-pipelines | jenkins | github-actions | none | unknown
+ci: unknown          # github-actions | none | unknown
 recommendations: []  # open suggestions for the user, e.g. ship-harness
 ---
 ```

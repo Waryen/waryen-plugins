@@ -40,7 +40,7 @@ You change code and commit it. Pushing belongs to `ship`. Read `${CLAUDE_PLUGIN_
 4. **Commit** each coherent unit.
    - Stage explicit paths.
    - An act-on finding for a secret this run committed, not yet on the remote: once the value is out of the code, rewrite the run's commits into one so no commit holds it: `git reset --soft <base>` (or `git merge-base HEAD origin/<target>` when `base` is empty), then commit. Check with `git log -p <base>..HEAD` that the value is gone.
-   - Message: `<scope>(<KEY>): <what, present tense>`, or the repo's own format when its hooks or docs define one.
+   - Message: `<scope>(#<number>): <what, present tense>` for an issue (`<scope>: …` otherwise), or the repo's own format when its hooks or docs define one.
    - Hooks run.
    - A test goes in the same commit as the fix it proves, so every commit stays green. The saved red output proves the test failed first.
 5. **Write** `iterations/<n>/implement.md` (in a run; on its own, put these lines in your reply): one line per slice or finding (done, or not done and why), the files touched, the commit SHAs, what you declined and why, and follow-ups you noticed outside the task.

@@ -95,6 +95,70 @@ scan_push() {
   [ -z "$hit" ] || deny R2-push "secrets by name (Rule 2): $hit adds what looks like a credential value; keep the value in the secret file and reference it by name"
 }
 
+# Rule 3: merge only the run's own PR, by its URL, within the target's rules.
+check_merge() {
+  own=
+  for w in $cmd; do
+    case "$w" in --admin|--delete-branch|-[a-zA-Z]*d*) deny R3-merge "merge without --admin or --delete-branch: the target's rules hold, and the branch is deleted afterwards with git push origin --delete (Rule 3)" ;; esac
+    w=$(printf '%s' "$w" | tr -d "\\\\\"'")
+    for u in $(yaml pr); do [ "$w" = "$u" ] && own=1; done
+  done
+  [ -n "$own" ] || deny R3-merge "merge only the run's own PR, passed by the URL in state.md (Rule 3)"
+}
+
+# Rule 3: once merged, the run deletes its own branch, unless keep_branch is set.
+# Only the exact form `git [-C <dir>] push origin --delete <branch>`, so nothing rides along.
+check_delete() {
+  dir=$cwd; set -- $cmd
+  [ "$1" = git ] && shift
+  [ "$1" = -C ] && { dir=$(norm "$2"); shift 2; }
+  [ $# -eq 4 ] && [ "$1 $2 $3" = "push origin --delete" ] || deny R3-push "delete a branch only as: git push origin --delete <run branch> (Rule 3)"
+  grep -qE '^keep_branch: *true' "$state" && deny R3-push "keep_branch is set: the merged branch stays (Rule 3)"
+  # The repo the push runs in: the state.md block whose worktree holds dir. Its branch and merged decide.
+  repo=$(awk -v dir="$(lc "$dir")/" '
+    function val(l) { sub(/^ *(- )?[a-z_]+: */, "", l); sub(/ *#.*$/, "", l); gsub(/"/, "", l); sub(/ *$/, "", l); return l }
+    function flush() { if (w != "" && index(dir, w "/") == 1) print b " " m; w = b = m = "" }
+    /^ *- key:/ { flush() }
+    /^ *(- )?worktree:/ { w = tolower(val($0)); sub(/\/$/, "", w) }
+    /^ *(- )?branch:/ { b = val($0) }
+    /^ *(- )?merged:/ { m = val($0) }
+    END { flush() }' "$state" | head -1)
+  [ -n "$repo" ] || deny R3-push "delete branches only from inside one of the run's worktrees (Rule 3)"
+  [ "$4" = "${repo%% *}" ] || deny R3-push "delete only this repo's run branch, ${repo%% *} (Rule 3)"
+  [ -n "${repo#* }" ] || deny R3-push "delete the branch only after this repo's PR merged (Rule 3)"
+}
+
+# own_pr <url>: the URL is one of the run's PRs, in state.md.
+own_pr() { for u in $(yaml pr); do [ "$(lc "$1")" = "$(lc "$u")" ] && return 0; done; return 1; }
+
+# Rule 3: gh api writes are review comments, replies and thread resolutions on the run's own PRs.
+check_api() {
+  case " $cmd " in
+    *" graphql "*)
+      case "$cmd" in *mutation*) ;; *) return ;; esac
+      case "$cmd" in *resolveReviewThread*) ;; *) deny R3-outward "gh api graphql mutations: only resolveReviewThread (Rule 3)" ;; esac
+      [ "$(printf '%s' "$cmd" | grep -o 'input:' | wc -l)" -eq 1 ] || deny R3-outward "one resolveReviewThread per mutation, nothing else (Rule 3)"
+      # A thread id is opaque: ask GitHub which PR it belongs to. No answer means no.
+      tid=$(printf '%s' "$cmd" | grep -oE 'threadId: *\\?"[^"\\]+' | head -1 | sed 's/.*"//')
+      [ -n "$tid" ] && url=$(gh api graphql -f query="query{node(id:\"$tid\"){... on PullRequestReviewThread{pullRequest{url}}}}" --jq .data.node.pullRequest.url 2>/dev/null) && own_pr "$url" ||
+        deny R3-outward "resolve threads only on the run's own PR (Rule 3): could not confirm thread ${tid:-?} belongs to it"
+      return ;;
+    *" -X PUT "*|*" -X PATCH "*|*" -X DELETE "*|*" --method PUT "*|*" --method PATCH "*|*" --method DELETE "*)
+      deny R3-outward "gh api writes only add review comments (Rule 3)" ;;
+  esac
+  for w in $cmd; do
+    p=${w#/}
+    case "$p" in
+      repos/*/pulls/[0-9]*/reviews|repos/*/pulls/[0-9]*/comments|repos/*/pulls/[0-9]*/comments/[0-9]*/replies)
+        # repos/<o>/<r>/pulls/<n>/… is the PR https://github.com/<o>/<r>/pull/<n>.
+        n=${p#repos/*/*/pulls/}; n=${n%%/*}; or=${p#repos/}; or=${or%%/pulls/*}
+        own_pr "https://github.com/$or/pull/$n" && return
+        deny R3-outward "gh api writes go only to the run's own PR (Rule 3): $or#$n is not in state.md" ;;
+    esac
+  done
+  deny R3-outward "gh api writes are limited to PR review comments and replies (Rule 3)"
+}
+
 # Rules 2, 3 and 5: credential stores, outward actions and hooks.
 check_bash() {
   case " $(lc "$cmd") " in
@@ -103,11 +167,13 @@ check_bash() {
   esac
   case " $cmd " in
     *" --no-verify "*|*core.hooksPath*|*HUSKY=0*) deny R5-hooks "hooks run (Rule 5): commit and push without --no-verify, core.hooksPath or HUSKY=0" ;;
-    *" gh pr merge "*|*" gh pr ready "*|*" gh pr close "*|*" gh pr reopen "*|*" gh pr comment "*|*" gh pr review "*|*" gh pr lock "*|*" gh pr unlock "*|*" gh issue comment "*|*" gh issue close "*|*" gh issue reopen "*|*" gh issue edit "*|*" gh issue delete "*|*" gh release "*|*" gh repo delete "*)
-      deny R3-outward "outward actions (Rule 3): merging, readying, closing, commenting, reviewing and releasing stay with the user" ;;
+    *" gh pr merge "*) check_merge ;;
+    *" gh pr close "*|*" gh pr reopen "*|*" gh pr comment "*|*" gh pr review "*|*" gh pr lock "*|*" gh pr unlock "*|*" gh issue comment "*|*" gh issue close "*|*" gh issue reopen "*|*" gh issue edit "*|*" gh issue delete "*|*" gh release "*|*" gh repo delete "*)
+      deny R3-outward "outward actions (Rule 3): closing, commenting outside a review, and releasing stay with the user" ;;
     *" gh pr create "*) case " $cmd " in *" --draft "*|*" -d "*) ;; *) deny R3-draft "every PR is a draft: add --draft" ;; esac ;;
-    *" gh api "*) case " $cmd " in *" -X "*|*" --method "*|*" -f "*|*" -F "*|*" --field "*|*" --raw-field "*|*" --input "*) deny R3-outward "gh api stays read-only (Rule 3)" ;; esac ;;
+    *" gh api "*) case " $cmd " in *" -X "*|*" --method "*|*" -f "*|*" -F "*|*" --field "*|*" --raw-field "*|*" --input "*) check_api ;; esac ;;
   esac
+  case " $cmd " in *" push "*" --delete "*) check_delete; return ;; esac
   targets=$(yaml target)
   mode=; push=
   for w in $cmd; do
@@ -139,24 +205,10 @@ check_read() {
   secret_file "$(lc "$path")" && deny R2-store "secrets by name (Rule 2): $path holds credential values; use the secret's name and let the app read it"
 }
 
-# Rules 3 and 6: Atlassian writes and the user's own browser.
+# Rule 6: the user's own browser.
 check_mcp() {
   case "$tool" in
     mcp__claude-in-chrome__*) deny R6-headless "runs are headless (Rule 6): the user's own browser stays out" ;;
-    *[Aa]tlassian*) ;;
-    *) return ;;
-  esac
-  case "${tool##*__}" in
-    executeWrite)
-      op=$(field name)
-      case "$op" in
-        createBitbucketRepoPullRequest) printf '%s' "$input" | grep -q '"draft": *true' || deny R3-draft "every PR is a draft: pass draft: true" ;;
-        updateBitbucketRepoPullRequest) printf '%s' "$input" | grep -q '"draft": *false' && deny R3-draft "every PR stays a draft: readying it is the user's call" ;;
-        runBitbucketRepoPipeline) ;;
-        *) deny R3-atlassian "executeWrite is open only for createBitbucketRepoPullRequest, updateBitbucketRepoPullRequest and runBitbucketRepoPipeline (Rule 3); $op stays with the user" ;;
-      esac ;;
-    executeDestructive|create*|update*|edit*|transition*|delete*|remove*|add*|run*|post*|merge*|approve*|decline*)
-      deny R3-atlassian "Jira, Confluence and Bitbucket stay read-only except draft PRs (Rule 3)" ;;
   esac
 }
 

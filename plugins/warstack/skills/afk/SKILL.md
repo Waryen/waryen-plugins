@@ -4,7 +4,7 @@ description: Queue warstack runs for while you are away from the keyboard (afk),
 argument-hint: <task> [; <task>…] [--hours <n>]   (each task as for /warstack:auto, plus --at <checkout>)
 disable-model-invocation: true
 allowed-tools: Read(/${CLAUDE_PLUGIN_ROOT}/**), Read(~/.warstack/**), Edit(~/.warstack/**), Write(~/.warstack/**)
-disallowed-tools: Bash(git push *), Bash(git -C * push *), Bash(gh pr create *), Bash(gh pr merge *), mcp__claude_ai_Atlassian_MCP__executeWrite, mcp__claude_ai_Atlassian_MCP__executeDestructive, mcp__claude_ai_Atlassian_MCP__createJiraIssue, mcp__claude_ai_Atlassian_MCP__editJiraIssue, mcp__claude_ai_Atlassian_MCP__transitionJiraIssue, mcp__claude_ai_Atlassian_MCP__addOrEditJiraIssueComment
+disallowed-tools: Bash(git push *), Bash(git -C * push *), Bash(gh pr create *), Bash(gh pr merge *), Bash(gh issue comment *), Bash(gh issue close *), Bash(gh issue edit *), Bash(gh issue delete *)
 ---
 
 # warstack afk
@@ -25,7 +25,7 @@ Done when: you have the ordered task list, each with its primary checkout.
 
 For each task, follow auto's §1 and §2 steps 1–7, with the task's `--at` checkout (or this session's) as its primary repo, and these differences:
 
-- **A run id or a ticket with a run** (auto §1): only a `stopped` or `parked` run joins the queue, as a resume. A `running` run is driven elsewhere, and a `done` one is done: say so and leave it out.
+- **A run id or an issue with a run** (auto §1): only a `stopped` or `parked` run joins the queue, as a resume. A `running` run is driven elsewhere, and a `done` one is done: say so and leave it out.
 - **Step 2:** `mode: headless`.
 - **Step 7:** gather every task's questions first, then ask them together, 4 per AskUserQuestion call, each naming its run id. An answer asking to drop the task leaves it out of the queue.
 - **Existing work** the user chose to continue: run step 8's existing-branch checks now, so a park shows up while the user is here.
@@ -38,8 +38,8 @@ Done when: every queued run is `parked` with no open question, and every task le
 What a headless run would fail on at 3am, settled now:
 
 1. **Exclude line** (conventions → Commands), once per repo. `.git/` is protected, and a headless run cannot get that approval.
-2. **Access.** For a `github.com` remote, `gh auth status`. For a `bitbucket.org` remote or a Jira task, `getAccessibleAtlassianResources`. A failure is the user's to fix now; nothing starts without it.
-3. **Permissions.** The driver runs `claude -p --permission-mode auto`: a call the classifier refuses is denied, not asked. From repo memory (`profile.md`: Bootstrap, test and e2e commands), list the commands no allow rule in `~/.claude/settings.json` or the repo's `.claude/settings*.json` covers, and offer the rules that would. Add only the ones the user accepts.
+2. **Access.** `gh auth status`: warstack supports GitHub only, for repos and issues. A failure is the user's to fix now; nothing starts without it.
+3. **Permissions.** The driver runs `claude -p --permission-mode auto`: a call the classifier refuses is denied, not asked. From repo memory (`profile.md`: Bootstrap, test and e2e commands), plus `gh pr *` and `gh api *` (ready, review comments and merge), list the commands no allow rule in `~/.claude/settings.json` or the repo's `.claude/settings*.json` covers, and offer the rules that would. Without them, a run's PR stays open and unmerged. Add only the ones the user accepts.
 4. **Power.** On macOS, the driver holds `caffeinate -i`, which does not keep a Mac with its lid closed awake on battery: when `pmset -g batt` says "Battery Power", tell the user to plug in. Elsewhere, tell them the machine must not suspend.
 
 Done when: every repo has its exclude line, every service answers, and the user has seen the uncovered commands.

@@ -27,7 +27,7 @@ For a run, read `task.md`, `state.md`, `decisions.md` and each repo's memory in 
 2. **Investigate.**
    - Code: read it, grep it, trace the callers.
    - History: `git log -S`, `git blame`.
-   - The ticket and linked pages, through the Atlassian MCP (read only).
+   - The issue and the issues and PRs it links, with `gh issue view` and `gh pr view` (read only).
    - Repo memory.
    - When a claim depends on behaviour, run it: a read-only command, or an experiment. Pick the experiment's worktree, the first that applies:
      1. the run's own worktree;

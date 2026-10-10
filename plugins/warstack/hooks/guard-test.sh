@@ -9,7 +9,13 @@ trap 'rm -rf "$FIX"' EXIT
 CWD=$FIX/repo/.claude/worktrees/guard-test
 OTHER=$FIX/other/.claude/worktrees/guard-test
 RUN=$HOME/.warstack/runs/guard-test
-mkdir -p "$RUN" "$CWD" "$OTHER" "$TMPDIR" "$HOME/.aws" "$HOME/.claude"
+mkdir -p "$RUN" "$CWD" "$OTHER" "$TMPDIR" "$HOME/.aws" "$HOME/.claude" "$FIX/bin"
+# A fake gh for thread lookups: thread T_OWN sits on the run's PR, T_ERR fails, any other is on someone else's PR.
+cat > "$FIX/bin/gh" <<'GH'
+#!/bin/sh
+case "$*" in *T_OWN*) echo https://github.com/o/r/pull/12 ;; *T_ERR*) exit 1 ;; *) echo https://github.com/o/r/pull/99 ;; esac
+GH
+chmod +x "$FIX/bin/gh"; export PATH="$FIX/bin:$PATH"
 cat > "$RUN/state.md" <<STATE
 ---
 run: guard-test
@@ -20,6 +26,7 @@ repos:
     worktree: $CWD
     branch: feat/guard-test
     target: develop
+    pr: https://github.com/o/r/pull/12   # PR URL
   - key: local-other
     checkout: $FIX/other
     worktree: $OTHER
@@ -55,9 +62,24 @@ t 2 "push HEAD:target of other repo"         "$(bash "$CWD" PreToolUse 'git push
 t 2 "push refs/heads/target"                 "$(bash "$CWD" PreToolUse 'git push origin HEAD:refs/heads/develop')"
 t 2 "second command in chain force"          "$(bash "$CWD" PreToolUse 'git fetch origin && git push origin --force feat/x')"
 t 2 "multiline force"                        "$(bash "$CWD" PreToolUse 'git add a\ngit push --force origin x')"
+t 2 "delete own branch before merge"         "$(bash "$CWD" PreToolUse 'git push origin --delete feat/guard-test')"
 t 0 "plain push"                             "$(bash "$CWD" PreToolUse 'git push -u origin feat/guard-test')"
 t 0 "push HEAD"                              "$(bash "$CWD" PreToolUse 'git push origin HEAD')"
 t 0 "push then log -n"                       "$(bash "$CWD" PreToolUse 'git push -u origin feat/x && git log --oneline -n 3')"
+
+sed 's/^    target: develop$/    target: develop\n    merged: abc123/' "$RUN/state.md" > "$RUN/s" && mv "$RUN/s" "$RUN/state.md"
+t 0 "delete own merged branch"               "$(bash "$CWD" PreToolUse 'git push origin --delete feat/guard-test')"
+t 0 "delete own merged branch via -C"        "$(bash "$CWD" PreToolUse "git -C $CWD push origin --delete feat/guard-test")"
+t 2 "delete other repo's unmerged branch"    "$(bash "$CWD" PreToolUse "git -C $OTHER push origin --delete feat/guard-test")"
+t 2 "delete from other repo's worktree"      "$(bash "$OTHER" PreToolUse 'git push origin --delete feat/guard-test')"
+t 2 "delete from outside the worktrees"      "$(bash "$CWD" PreToolUse "git -C $FIX/repo push origin --delete feat/guard-test")"
+t 2 "delete other branch"                    "$(bash "$CWD" PreToolUse 'git push origin --delete feat/someone-else')"
+t 2 "delete target"                          "$(bash "$CWD" PreToolUse 'git push origin --delete develop')"
+t 2 "delete with something chained"          "$(bash "$CWD" PreToolUse 'git push origin --delete feat/guard-test && git push --force origin x')"
+t 2 "delete two branches"                    "$(bash "$CWD" PreToolUse 'git push origin --delete feat/guard-test develop')"
+echo 'keep_branch: true' >> "$RUN/state.md"
+t 2 "delete with keep_branch"                "$(bash "$CWD" PreToolUse 'git push origin --delete feat/guard-test')"
+grep -v -e '^keep_branch' -e '^    merged' "$RUN/state.md" > "$RUN/s" && mv "$RUN/s" "$RUN/state.md"
 
 echo "# rule 5: hooks"
 t 2 "commit -n"                              "$(bash "$CWD" PreToolUse 'git commit -n -m \"x\"')"
@@ -70,15 +92,40 @@ t 0 "commit -am"                             "$(bash "$CWD" PreToolUse 'git comm
 t 0 "multiline command"                      "$(bash "$CWD" PreToolUse 'git add src/a.ts\ngit commit -m \"feat: a\"')"
 
 echo "# rule 3: gh"
-t 2 "gh pr merge"                            "$(bash "$CWD" PreToolUse 'gh pr merge 12 --squash')"
-t 2 "gh pr ready"                            "$(bash "$CWD" PreToolUse 'gh pr ready 12')"
+t 2 "gh pr merge by number"                  "$(bash "$CWD" PreToolUse 'gh pr merge 12 --squash')"
+t 2 "gh pr merge other PR"                   "$(bash "$CWD" PreToolUse 'gh pr merge https://github.com/o/r/pull/99 --squash')"
+t 2 "gh pr merge prefix of own PR"           "$(bash "$CWD" PreToolUse 'gh pr merge https://github.com/o/r/pull/1 --squash')"
+t 2 "gh pr merge --admin"                    "$(bash "$CWD" PreToolUse 'gh pr merge https://github.com/o/r/pull/12 --squash --admin')"
+t 2 "gh pr merge --delete-branch"            "$(bash "$CWD" PreToolUse 'gh pr merge https://github.com/o/r/pull/12 --merge --delete-branch')"
+t 2 "gh pr merge -sd"                        "$(bash "$CWD" PreToolUse 'gh pr merge -sd https://github.com/o/r/pull/12')"
+t 0 "gh pr merge own PR"                     "$(bash "$CWD" PreToolUse 'gh pr merge https://github.com/o/r/pull/12 --squash')"
+t 0 "gh pr merge own PR quoted"              "$(bash "$CWD" PreToolUse 'gh pr merge \"https://github.com/o/r/pull/12\" --rebase')"
+t 0 "gh pr ready"                            "$(bash "$CWD" PreToolUse 'gh pr ready https://github.com/o/r/pull/12')"
 t 2 "gh pr comment"                          "$(bash "$CWD" PreToolUse 'gh pr comment 12 --body hi')"
 t 2 "gh pr create without draft"             "$(bash "$CWD" PreToolUse 'gh pr create --base develop --head feat/x --title t --body-file f')"
 t 0 "gh pr create --draft"                   "$(bash "$CWD" PreToolUse 'gh pr create --draft --base develop --head feat/x --title t --body-file f')"
 t 0 "gh pr edit"                             "$(bash "$CWD" PreToolUse 'gh pr edit 12 --body \"Merge after: x\"')"
 t 0 "gh pr checks"                           "$(bash "$CWD" PreToolUse 'gh pr checks feat/x')"
 t 0 "gh api read"                            "$(bash "$CWD" PreToolUse 'gh api repos/o/r/pulls/12')"
-t 2 "gh api write"                           "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/12/reviews')"
+t 2 "gh api write"                           "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/issues/12/labels -f labels=x')"
+t 2 "gh api merge endpoint"                  "$(bash "$CWD" PreToolUse 'gh api -X PUT repos/o/r/pulls/12/merge')"
+t 2 "gh api edit comment"                    "$(bash "$CWD" PreToolUse 'gh api -X PATCH repos/o/r/pulls/comments/5 -f body=x')"
+t 2 "gh api graphql merge"                   "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:1}){clientMutationId}}'")"
+t 2 "gh api graphql resolve plus merge"      "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:1}){clientMutationId} mergePullRequest(input:{pullRequestId:1}){clientMutationId}}'")"
+t 0 "gh api review"                          "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/12/reviews --input /tmp/r.json')"
+t 2 "gh api review on another PR"            "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/99/reviews --input /tmp/r.json')"
+t 2 "gh api review, PR number prefix"        "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/123/reviews --input /tmp/r.json')"
+t 2 "gh api review on another repo"          "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/x/pulls/12/reviews --input /tmp/r.json')"
+t 2 "gh api reply on another PR"             "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/99/comments/5/replies -f body=x')"
+t 0 "gh api reply"                           "$(bash "$CWD" PreToolUse 'gh api -X POST /repos/o/r/pulls/12/comments/5/replies -f body=fixed')"
+t 0 "gh api graphql read"                    "$(bash "$CWD" PreToolUse "gh api graphql -f query='query{repository(owner:1){id}}'")"
+t 0 "gh api graphql resolve own thread"      "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\\\"T_OWN\\\"}){thread{isResolved}}}'")"
+t 2 "gh api graphql resolve other thread"    "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\\\"T_X\\\"}){thread{isResolved}}}'")"
+t 2 "gh api graphql resolve, lookup fails"   "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\\\"T_ERR\\\"}){thread{isResolved}}}'")"
+t 2 "gh api graphql resolve, no thread id"   "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:1}){thread{isResolved}}}'")"
+t 0 "gh issue view"                          "$(bash "$CWD" PreToolUse 'gh issue view 1291 --comments --json title,body')"
+t 2 "gh issue comment"                       "$(bash "$CWD" PreToolUse 'gh issue comment 1291 --body hi')"
+t 2 "gh issue close"                         "$(bash "$CWD" PreToolUse 'gh issue close 1291')"
 t 2 "gh release"                             "$(bash "$CWD" PreToolUse 'gh release create v1')"
 t 0 "npm test"                               "$(bash "$CWD" PreToolUse 'npm test -- --watch=false')"
 
@@ -132,7 +179,6 @@ printf 'const key = "AKIAIOSFODNN7EXAMPLE";\n' > k.ts && gitc add k.ts && gitc c
 t 2 "push with AWS key in diff"              "$(bash "$CWD" PreToolUse 'git push -u origin feat/guard-test')"
 gitc reset -q --hard origin/develop
 printf 'token = "ATATT3xFfGF0abcdefghijklmnopqrstuvwxyz"\n' > k.txt && gitc add k.txt && gitc commit -qm tok
-t 2 "push with Atlassian token via git -C"   "$(bash "$OTHER" PreToolUse "git -C $CWD push origin HEAD")"
 gitc reset -q --hard origin/develop
 printf 'SZ_PASSWORD=hunter2hunter2\n' > .env && gitc add -f .env && gitc commit -qm env
 t 2 "push adding .env"                       "$(bash "$CWD" PreToolUse 'git push -u origin feat/guard-test')"
@@ -146,25 +192,9 @@ t 0 "push scan uses @{u}, not the target"    "$(bash "$CWD" PreToolUse 'git push
 gitc reset -q --hard origin/develop
 cd "$FIX"
 
-echo "# rules 3 and 6: mcp"
+echo "# rule 6: mcp"
 t 2 "chrome"                                 "$(mcp mcp__claude-in-chrome__navigate '{"url":"http://x"}')"
 t 0 "mobile-mcp"                             "$(mcp mcp__plugin_mobile-mcp_mobile-mcp__mobile_take_screenshot '{}')"
-t 0 "jira read"                              "$(mcp mcp__claude_ai_Atlassian_MCP__getJiraIssue '{"cloudId":"c","issueIdOrKey":"X-1"}')"
-t 0 "executeRead"                            "$(mcp mcp__claude_ai_Atlassian_MCP__executeRead '{"name":"getBitbucketRepoPullRequest","cloudId":"c","inputs":{}}')"
-t 0 "atlassianUserInfo"                      "$(mcp mcp__claude_ai_Atlassian_MCP__atlassianUserInfo '{}')"
-t 0 "search"                                 "$(mcp mcp__claude_ai_Atlassian_MCP__search '{"query":"x"}')"
-t 0 "createPR draft"                         "$(mcp mcp__claude_ai_Atlassian_MCP__executeWrite '{"name":"createBitbucketRepoPullRequest","cloudId":"c","inputs":{"title":"t","draft":true}}')"
-t 2 "createPR no draft"                      "$(mcp mcp__claude_ai_Atlassian_MCP__executeWrite '{"name":"createBitbucketRepoPullRequest","cloudId":"c","inputs":{"title":"t"}}')"
-t 0 "updatePR"                               "$(mcp mcp__claude_ai_Atlassian_MCP__executeWrite '{"name":"updateBitbucketRepoPullRequest","cloudId":"c","inputs":{"description":"d"}}')"
-t 2 "updatePR undraft"                       "$(mcp mcp__claude_ai_Atlassian_MCP__executeWrite '{"name":"updateBitbucketRepoPullRequest","cloudId":"c","inputs":{"draft":false}}')"
-t 0 "rerun pipeline"                         "$(mcp mcp__claude_ai_Atlassian_MCP__executeWrite '{"name":"runBitbucketRepoPipeline","cloudId":"c","inputs":{}}')"
-t 2 "executeWrite jira"                      "$(mcp mcp__claude_ai_Atlassian_MCP__executeWrite '{"name":"editJiraIssue","cloudId":"c","inputs":{}}')"
-t 2 "executeWrite PR comment"                "$(mcp mcp__claude_ai_Atlassian_MCP__executeWrite '{"name":"createBitbucketRepoPullRequestComment","cloudId":"c","inputs":{}}')"
-t 2 "executeDestructive"                     "$(mcp mcp__claude_ai_Atlassian_MCP__executeDestructive '{"name":"deleteBitbucketBranch","cloudId":"c","inputs":{}}')"
-t 2 "editJiraIssue"                          "$(mcp mcp__claude_ai_Atlassian_MCP__editJiraIssue '{}')"
-t 2 "jira comment"                           "$(mcp mcp__claude_ai_Atlassian_MCP__addOrEditJiraIssueComment '{}')"
-t 2 "confluence create"                      "$(mcp mcp__claude_ai_Atlassian_MCP__createConfluenceContent '{}')"
-t 2 "other prefix atlassian write"           "$(mcp mcp__atlassian__updateConfluencePage '{}')"
 
 echo "# input shapes"
 t 0 "pretty-printed json"                    "$(printf '{\n  "session_id": "s",\n  "cwd": "%s",\n  "hook_event_name": "PreToolUse",\n  "tool_name": "Bash",\n  "tool_input": {\n    "command": "git push -u origin feat/x",\n    "description": "d"\n  }\n}' "$CWD")"
@@ -175,13 +205,13 @@ rm -f "$RUN/audit.log"
 t 0 "post bash logs"                         "$(bash "$CWD" PostToolUse 'npm test')"
 t 0 "post edit logs"                         "$(printf '{"cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"%s/src/a.ts"},"tool_response":{"filePath":"x","command":"nope"}}' "$CWD" "$CWD")"
 t 0 "post skill logs"                        "$(printf '{"cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Skill","tool_input":{"skill":"warstack:implement","args":"guard-test"},"tool_response":{"text":"ok"}}' "$CWD")"
-t 0 "post mcp logs"                          "$(printf '{"cwd":"%s","hook_event_name":"PostToolUse","tool_name":"mcp__claude_ai_Atlassian_MCP__executeRead","tool_input":{"name":"getBitbucketRepoPullRequest"},"tool_response":{"text":"ok"}}' "$CWD")"
+t 0 "post mcp logs"                          "$(printf '{"cwd":"%s","hook_event_name":"PostToolUse","tool_name":"mcp__plugin_mobile-mcp_mobile-mcp__mobile_take_screenshot","tool_input":{"name":"shot"},"tool_response":{"text":"ok"}}' "$CWD")"
 t 2 "deny logs too"                          "$(bash "$CWD" PreToolUse 'git push --force origin feat/x')"
 a() { grep -qE "$1" "$RUN/audit.log" && echo "ok   audit: $2" || { echo "FAIL audit: $2"; fail=1; }; }
 a '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z · sess1234 · Bash · npm test$' "bash line with session id"
 a ' · - · Edit · .*/src/a.ts$' "edit line without session id"
 a ' · Skill · warstack:implement guard-test$' "skill line"
-a ' · mcp__claude_ai_Atlassian_MCP__executeRead · getBitbucketRepoPullRequest$' "mcp line"
+a ' · mcp__plugin_mobile-mcp_mobile-mcp__mobile_take_screenshot · shot$' "mcp line"
 a ' · sess1234 · DENIED · R3-push · Bash · ' "denial with rule id"
 [ "$(grep -c '' "$RUN/audit.log")" = 5 ] && echo "ok   audit: 5 lines" || { echo "FAIL audit: $(grep -c '' "$RUN/audit.log") lines"; fail=1; }
 

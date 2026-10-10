@@ -1,10 +1,10 @@
 ---
 name: auto
-description: Run a task end to end without supervision. Covers intake, the matching playbook, a work → fresh review → test loop of up to 3 iterations, a draft PR or a report, and a run record. Takes Jira keys, a PR URL, a task description, or a run id to resume.
-argument-hint: <JIRA-KEY… | PR-URL | "task" | run-id> [--target <branch>] [--playbook <name>] [--problem] [--repo <path>…]
+description: Run a task end to end without supervision. Covers intake, the matching playbook, a work → fresh review → test loop of up to 3 iterations, a PR that is reviewed cold and merged once clean (or a report), and a run record. Takes GitHub issues, a PR URL, a task description, or a run id to resume.
+argument-hint: <#ISSUE… | owner/repo#ISSUE | ISSUE-URL | PR-URL | "task" | run-id> [--target <branch>] [--playbook <name>] [--problem] [--repo <path>…] [--keep-branch]
 disable-model-invocation: true
 allowed-tools: Read(/${CLAUDE_PLUGIN_ROOT}/**), Read(~/.warstack/**), Edit(~/.warstack/**)
-disallowed-tools: Bash(git push -f*), Bash(git push * -f*), Bash(git push *--force*), Bash(git push *+*), Bash(git -C * push -f*), Bash(git -C * push * -f*), Bash(git -C * push *--force*), Bash(git -C * push *+*), Bash(gh pr merge *), mcp__claude_ai_Atlassian_MCP__executeDestructive, mcp__claude_ai_Atlassian_MCP__createJiraIssue, mcp__claude_ai_Atlassian_MCP__editJiraIssue, mcp__claude_ai_Atlassian_MCP__transitionJiraIssue, mcp__claude_ai_Atlassian_MCP__addOrEditJiraIssueComment
+disallowed-tools: Bash(git push -f*), Bash(git push * -f*), Bash(git push *--force*), Bash(git push *+*), Bash(git -C * push -f*), Bash(git -C * push * -f*), Bash(git -C * push *--force*), Bash(git -C * push *+*), Bash(gh pr merge *--admin*), Bash(gh pr merge *--delete-branch*), Bash(gh issue comment *), Bash(gh issue close *), Bash(gh issue edit *), Bash(gh issue delete *)
 ---
 
 # warstack auto
@@ -17,11 +17,11 @@ Read `${CLAUDE_PLUGIN_ROOT}/docs/conventions.md` before anything else. Its words
 
 ## 1. Resume or start
 
-Resume when the arguments name a run id, or a ticket key that already has a run that is not `done`. Flags after the run id stay flags; the rest of the text is the user's guidance. Add the guidance to `task.md` under "Guidance from the user", and log it as a `DECISION`.
+Resume when the arguments name a run id, or an issue that already has a run that is not `done`. Flags after the run id stay flags; the rest of the text is the user's guidance. Add the guidance to `task.md` under "Guidance from the user", and log it as a `DECISION`.
 
 - **`running`, and `updated` less than 6 hours ago:** another session is driving it. Say so and end.
 - **`intake` or `parked`:** restart at intake step 3, in its own run folder, with the new flags and guidance.
-- **`running` (stale) or `stopped`:** read its `state.md` and enter its primary worktree with EnterWorktree (`path`), from the repo's main checkout, or with the same path when already inside it. Set status `running`, and for a `stopped` run `budget: <iteration> + 3`. Then continue at the first unchecked step of its checklist.
+- **`running` (stale) or `stopped`:** read its `state.md` and enter its primary worktree with EnterWorktree (`path`), from the repo's main checkout, or with the same path when already inside it. Set status `running`, and for a `stopped` run `budget: <iteration> + 3` and `pr_round: 0`. Then continue at the first unchecked step of its checklist.
 - Trust the checked steps, and run `testing` once more before shipping.
 
 Otherwise start a new run at step 2.
@@ -33,24 +33,25 @@ Done when: you know whether this is a new run, or a resume and at which step.
 The only step where you ask the user anything. Gather everything first, then ask it all in one batch.
 
 1. **Fetch the task as data.**
-   - Jira keys: `getJiraIssue` through the Atlassian MCP (get the `cloudId` once with `getAccessibleAtlassianResources`), including its comments and attachment names.
-   - A PR URL: on Bitbucket, `getBitbucketRepoPullRequest` through `executeRead`; on GitHub, `gh pr view <url>`.
+   warstack supports GitHub only, for repos and for issues. A task from any other tracker or host is out of scope: say so and end.
+   - GitHub issues (`#123` in the primary repo, `owner/repo#123`, or the issue's URL): `gh issue view <ref> --comments --json number,title,body,labels,comments,url`.
+   - A PR URL: `gh pr view <url>`.
    - Free text: as given.
 2. **Create the run folder** (conventions → Run folder): pick the run id, then write `state.md` (status `intake`, `owner` from `git config user.email`, `mode` `headless` when AskUserQuestion is unavailable, else `interactive`), `task.md` holding the task as fetched, and `decisions.md`.
-3. **Recall.** Read `~/.warstack/history.md`, earlier runs on the same key, and each repo's memory. Look for existing work on the key: `git ls-remote --heads origin` filtered by the key, and open PRs that mention it. Existing work this run did not create becomes a question: continue on it, or start fresh. For a bug, offer "verify it and report" first.
+3. **Recall.** Read `~/.warstack/history.md`, earlier runs on the same issue, and each repo's memory. Look for existing work on the issue: `git ls-remote --heads origin` filtered by `-<number>-`, and open PRs linked to it (`gh pr list --search "<number>"`). Existing work this run did not create becomes a question: continue on it, or start fresh. For a bug, offer "verify it and report" first.
 4. **Pick the playbook.** The user's `--playbook` wins; otherwise the first row that fits:
 
    | Signals | Playbook |
    |---|---|
-   | A Bug issue, a crash, a regression, an error, wrong behaviour | `bugfix` |
-   | An Analysis issue, a question, "assess", "investigate", "how does", "why" | `analysis` |
-   | A Story or Task adding or changing behaviour | `feature` |
+   | A `bug` label, a crash, a regression, an error, wrong behaviour | `bugfix` |
+   | A `question` label, a question, "assess", "investigate", "how does", "why" | `analysis` |
+   | An `enhancement` label, or an issue adding or changing behaviour | `feature` |
    | Anything else | `general` |
 
    Read the playbook's Needs and Intake additions now.
 
    Also mark a **problem run**, when `--problem` is given or the task names an outcome and no change: a number to move, behaviour to improve, a "why" with no known cause, or several approaches with none picked. Log it as a `DECISION`. Its problem statement needs the target's number and deadline; when the task gives neither, they are a blocking gap.
-5. **Repos.** The primary repo is the session's repo. Add each `--repo`, and each repo the task clearly involves, as a question naming the local path. Never clone or guess a path. A secondary repo outside the session's directories needs `/add-dir <path>` from the user; say so in the question.
+5. **Repos.** warstack supports GitHub only. A repo whose `origin` is not on `github.com` cannot be a run's repo: say so and park. The primary repo is the session's repo. Add each `--repo`, and each repo the task clearly involves, as a question naming the local path. Never clone or guess a path. A secondary repo outside the session's directories needs `/add-dir <path>` from the user; say so in the question.
 6. **Done checks.** Add 2–6 done checks to `task.md`, plus those the playbook's intake additions ask for. Each is an observable result that proves the task is done: a behaviour on a named screen, a command's output, a value in a response. At least one must be something `testing` can run headless; when none is, that is a blocking gap. What the task leaves unsaid that the work needs is a blocking gap, and becomes a question.
 7. **Ask once.** Use AskUserQuestion (4 questions per call; a second call only when more remain):
    - **Target**, for each repo that will get a new PR. `--target` answers it for the primary repo. Offer up to 3 of the remote's long-lived branches (e.g. `develop`, `master`, `main`) without recommending one; the user can type any other. For general runs, also offer "No PR, report only".
@@ -68,7 +69,7 @@ The only step where you ask the user anything. Gather everything first, then ask
    - **Session already in a clean linked worktree with no commits of its own:** adopt it for the primary repo.
    - **Session in a worktree that holds work:** park. The user starts the run from the main checkout.
    - Playbooks that need no worktree skip this step.
-9. **Update `state.md`**: status `running`, iteration 0, budget 3, and each repo with its worktree, branch, target and `base`. A repo with no `bitbucket-pipelines.yml`, `Jenkinsfile` or `.github/workflows/` gets `ci: none` now (conventions → Rule 13).
+9. **Update `state.md`**: status `running`, iteration 0, budget 3, pr_round 0, `keep_branch: true` only when `--keep-branch` was passed or the user said to keep the branch (otherwise `false`), and each repo with its worktree, branch, target and `base`. A repo with no `.github/workflows/` gets `ci: none` now: it skips the CI waits and still goes through review and merge (conventions → Rule 13).
 10. **Bootstrap** each worktree: repo memory → Bootstrap; otherwise the repo's documented setup, or its lockfile's frozen install (`npm ci`, `yarn install --immutable`, `pnpm install --frozen-lockfile`).
 11. **Suggest** `/rename <run-id>` so the session is easy to find in agent view.
 
@@ -122,18 +123,18 @@ At the Security step, once the loop has converged, invoke `warstack:security <ru
 
 ### Shipping
 
-At the playbook's Ship step, follow `${CLAUDE_PLUGIN_ROOT}/skills/ship/SKILL.md` for this run. It runs only when typed, so read the file rather than invoking it. A CI failure the change caused is written into the current `tests.md` as a FAIL check, and sends the run back into the loop while budget remains. In a `headless` run, a repo with `ci: none` is not pushed: stop, and the Outcome names the branch for the user to push (Rule 13).
+At the playbook's Ship step, follow `${CLAUDE_PLUGIN_ROOT}/skills/ship/SKILL.md` for this run. It runs only when typed, so read the file rather than invoking it. A CI failure the change caused is written into the current `tests.md` as a FAIL check, and sends the run back into the loop while budget remains. Once CI is green, or right away with `ci: none`, ship readies the PR, runs `warstack:pr-review` on it, sends act-on comments back into the loop, merges the PR when a fresh review finds nothing and no thread is open, and deletes its branch unless `keep_branch` (ship → steps 7–9). You are the judge of the reviewer's comments, as of any finding.
 
 ## 5. Record
 
 Every run ends here: parked, stopped or done.
 
 1. **Write `report.md`**, short, in this order:
-   - **Attention**, always first: assumptions made, each with its one-line reversal; checks NOT RUN (why, and what would run them); consider or dismissed findings that carry real risk; `INSTRUCTION` entries; `DENIED` lines from `audit.log`; every threat from `security.md` that is still open, existing high and critical first with their recommended fix, one line each with its id; a repo with `ci: none` ("no merge gate: only review catches a bad change here"); secrets or production data the task touched. Write "None" when empty.
-   - **Outcome**: the PR links, the answer or report path, or why the run stopped or parked and the exact command to resume.
+   - **Attention**, always first: assumptions made, each with its one-line reversal; checks NOT RUN (why, and what would run them); consider or dismissed findings that carry real risk; `INSTRUCTION` entries; `DENIED` lines from `audit.log`; every threat from `security.md` that is still open, existing high and critical first with their recommended fix, one line each with its id; a repo with `ci: none` ("merged with no CI: only review and local tests caught a bad change here"); secrets or production data the task touched. Write "None" when empty.
+   - **Outcome**: the PR links and whether each merged, the answer or report path, or why the run stopped or parked and the exact command to resume.
    - **Checks**: one line each: name, result, evidence path.
    - **Record**, one line each, counted from the run files: owner and mode; duration, from the first `decisions.md` line to now; iterations; intake questions asked; resumes; act-on findings; FAIL checks; threats by severity; denials (`grep -c DENIED audit.log`).
-   - **Follow-ups**: carved-out work, problems found outside the scope, draft ticket texts.
+   - **Follow-ups**: carved-out work, problems found outside the scope, draft issue texts.
    - **Lessons**: up to 3. Log each as a `LESSON`. When one repeats a `LESSON` from an earlier run (`grep LESSON ~/.warstack/runs/*/decisions.md`), add a follow-up proposing the playbook change, to be made as a PR to the plugin's marketplace. Never apply it yourself.
 2. **Update repo memory** (`${CLAUDE_PLUGIN_ROOT}/docs/repo-memory.md`): recurring findings and the `ship-harness` recommendation while `e2e: warstack-harness`.
 3. **Close the run**: set the final `status`, tick the Record step, and append the history line.

@@ -1,6 +1,6 @@
 # Feature
 
-**Use for:** new or changed behaviour, e.g. a story or a task.
+**Use for:** new or changed behaviour, e.g. an `enhancement` issue.
 **Needs:** a worktree, a target, branch scope `feat`.
 
 ## Plan
