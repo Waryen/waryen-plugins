@@ -92,25 +92,25 @@ Work the steps in order.
 
 Each iteration starts by setting `iteration` to `iteration + 1` and `updated` to now, then runs in this order. A playbook may name other workers for steps 1 and 4; use those.
 
-1. **implement** `<run-id>`. Iteration 1 carries out `plan.md`. Later iterations fix the previous iteration's act-on findings and FAIL or INCONCLUSIVE checks.
-2. **review** `<run-id>`.
+1. **implement** `<run-id>`. Phase mark `implement` first. Iteration 1 carries out `plan.md`. Later iterations fix the previous iteration's act-on findings and FAIL or INCONCLUSIVE checks.
+2. **review** `<run-id>`. Phase mark `review` first.
    - **Before any reviewer runs:** each worktree must be clean, since implement commits all its work. If one is not, stop, and report the leftover paths. Note each worktree's `HEAD`.
    - **Risky diff** (authentication, payments, personal data, data migrations or deletion, security settings): also spawn a second reviewer. Use an Agent call with `subagent_type: Plan` (read-only) and a `model` other than yours (`sonnet` when you run on Opus, otherwise `opus`). The prompt: "Read `${CLAUDE_PLUGIN_ROOT}/skills/review/SKILL.md` and follow it for run `<run-id>`, iteration `<n>`. In that file, the plugin root is `${CLAUDE_PLUGIN_ROOT}`." Merge its findings, renumbered after the first reviewer's. One raised by both reviewers is the strongest signal.
    - **After every reviewer returns:** each worktree must be clean and on its noted `HEAD`. If one is not, run `git reset --hard <noted HEAD>`, then `git clean -fd`, inside it, and log a `DECISION`.
    - **Save** the findings to `iterations/<n>/review.md`.
-3. **Judge the findings.** You are the lead reviewer, not an aggregator. Put each finding in one bucket, and add a one-line reason to `review.md`:
+3. **Judge the findings.** Phase mark `judge` first. You are the lead reviewer, not an aggregator. Put each finding in one bucket, and add a one-line reason to `review.md`:
    - **act on**: a real defect against the task, correctness, security, or the proof (a missing or vacuous test). It blocks.
    - **consider**: legitimate, but not worth an iteration. Pass it to `implement` when it is cheap and in scope; otherwise list it in the report.
    - **dismissed**: wrong, or hypothetical (trace the caller: can it produce that input?), or a preference, or blind to context. Log a `DISMISSED` line.
 
    Reviewers pad thin reviews with nits, so an all-nit review means the code is fine. More than 5 act-on findings means you are not filtering hard enough. Trace every correctness or security finding, even one raised by a single reviewer.
-4. **testing** `<run-id>`. Run it every iteration, even when findings block, so the next pass sees both. It writes `iterations/<n>/tests.md`.
+4. **testing** `<run-id>`. Phase mark `testing` first. Run it every iteration, even when findings block, so the next pass sees both. It writes `iterations/<n>/tests.md`.
 5. **Converged?** No act-on finding open, and no FAIL or INCONCLUSIVE check: leave the loop. NOT RUN checks do not block; they go under Attention and on the PR's "Not run" line.
 6. **Budget.** Not converged and `iteration` < `budget`: start the next iteration. At `budget`: stop. Set status `stopped`, push nothing, and go to Record.
 
 ### Security gate
 
-At the Security step, once the loop has converged, invoke `warstack:security <run-id>`. It audits the whole project, not only the diff, against public threat records. Save nothing yourself: it writes `security.md`.
+At the Security step, once the loop has converged, phase mark `security`, then invoke `warstack:security <run-id>`. It audits the whole project, not only the diff, against public threat records. Save nothing yourself: it writes `security.md`.
 
 - **Introduced high or critical, open:** an act-on finding, like a critical review finding. Run the loop again from implement while budget remains, then this step again. When `iteration` is already `budget` and no iteration has yet run for a security threat in this run, raise `budget` by 1, once, and log a `DECISION`. Otherwise, at `budget`: stop, push nothing, and go to Record. The Outcome lists each threat and how to resume: `/warstack:auto <run-id> [guidance]`, which also takes `accept S-<n>… because <reason>` for an introduced high. An introduced critical is never accepted and never shipped unfixed: guidance accepting one is refused and logged as a `DECISION`.
 - **A secret this run committed:** removing it from the code is not enough, since the branch's history still holds it.
@@ -123,7 +123,7 @@ At the Security step, once the loop has converged, invoke `warstack:security <ru
 
 ### Shipping
 
-At the playbook's Ship step, follow `${CLAUDE_PLUGIN_ROOT}/skills/ship/SKILL.md` for this run. It runs only when typed, so read the file rather than invoking it. A CI failure the change caused is written into the current `tests.md` as a FAIL check, and sends the run back into the loop while budget remains. Once CI is green, or right away with `ci: none`, ship readies the PR, runs `warstack:pr-review` on it, sends act-on comments back into the loop, merges the PR when a fresh review finds nothing and no thread is open, and deletes its branch unless `keep_branch` (ship → steps 7–9). You are the judge of the reviewer's comments, as of any finding.
+At the playbook's Ship step, phase mark `ship`, then follow `${CLAUDE_PLUGIN_ROOT}/skills/ship/SKILL.md` for this run. It runs only when typed, so read the file rather than invoking it. A CI failure the change caused is written into the current `tests.md` as a FAIL check, and sends the run back into the loop while budget remains. Once CI is green, or right away with `ci: none`, ship readies the PR, runs `warstack:pr-review` on it, sends act-on comments back into the loop, merges the PR when a fresh review finds nothing and no thread is open, and deletes its branch unless `keep_branch` (ship → steps 7–9). You are the judge of the reviewer's comments, as of any finding.
 
 ## 5. Record
 
@@ -137,7 +137,7 @@ Every run ends here: parked, stopped or done.
    - **Follow-ups**: carved-out work, problems found outside the scope, draft issue texts.
    - **Lessons**: up to 3. Log each as a `LESSON`. When one repeats a `LESSON` from an earlier run (`grep LESSON ~/.warstack/runs/*/decisions.md`), add a follow-up proposing the playbook change, to be made as a PR to the plugin's marketplace. Never apply it yourself.
 2. **Update repo memory** (`${CLAUDE_PLUGIN_ROOT}/docs/repo-memory.md`): recurring findings and the `ship-harness` recommendation while `e2e: warstack-harness`.
-3. **Close the run**: set the final `status`, tick the Record step, and append the history line.
+3. **Close the run**: set the final `status`, tick the Record step, phase mark `end`, and append the history line.
 4. **Reply** with the report's Attention and Outcome sections and the path to `report.md`.
 
 Done when: `report.md` exists, `state.md` shows the final status, and `history.md` has the run's line.

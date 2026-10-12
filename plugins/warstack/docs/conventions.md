@@ -33,6 +33,7 @@ Shared by every warstack skill and playbook. `<TS>` means `~/.warstack`, warstac
 ├── problem.md      written by problem-solving: statement, issue tree, hypotheses, recommendation
 ├── plan.md         written by the playbook's plan step
 ├── decisions.md    append-only log, including every intake answer
+├── phases.log      one line per phase start, for timing (Commands → Phase mark)
 ├── audit.log       written by the guard: every command, write and MCP call, and each denial (below)
 ├── iterations/<n>/ implement.md · review.md · tests.md (repro: iterations/0/)
 ├── security.md     written by security: verdict, threats by severity, coverage
@@ -155,11 +156,19 @@ Success means you hold it. Then write `<run-id> <UTC time>` to `<TS>/locks/<devi
 
 Free port: pick one in 4100–4999 for which `curl -s -o /dev/null --max-time 10 http://localhost:<port>` exits with code 7, meaning nothing listens there.
 
+Phase mark, appended when a phase starts (`implement`, `review`, `judge`, `testing`, `security`, `ship`), and `end` when the run ends. A phase lasts until the next mark. Include the iteration:
+
+```bash
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) · <phase> · <iteration>" >> <run folder>/phases.log
+```
+
 History line, appended when a run ends:
 
 ```bash
-echo "- <yyyy-mm-dd> · <run-id> · <playbook> · <outcome> · <iterations> iterations · <n> denied · <PR links or report path>" >> <TS>/history.md
+echo "- <yyyy-mm-dd> · <run-id> · <playbook> · <outcome> · <iterations> iterations · <n> denied · <minutes>m · <PR links or report path>" >> <TS>/history.md
 ```
+
+`<minutes>` is the first to the last `phases.log` timestamp, rounded; `0` when the log has fewer than two lines.
 
 ## Rules
 

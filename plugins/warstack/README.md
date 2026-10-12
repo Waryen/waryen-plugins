@@ -51,7 +51,7 @@ Everything warstack knows sits in `~/.warstack/` (`%USERPROFILE%\.warstack` on W
 ```
 runs/<run-id>/     state, task, plan, decision log, audit log, iterations, evidence, report
 repos/<repo>/      what it learned per repo: commands, launch recipe, features, its e2e harness, its security ledger
-history.md         one line per finished run
+history.md         one line per finished run, with its duration
 locks/             one per simulator or emulator in use
 afk/<yyyymmdd-hhmm>/  one per afk queue: queue, driver pid, timeline, each run's session output
 ```
