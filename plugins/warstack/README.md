@@ -10,7 +10,8 @@ Give warstack a task and it drives it end to end on its own. A code change gets 
 
 | Command | What it does | Runs in |
 |---|---|---|
-| `/warstack:auto <task> [--target <branch>] [--playbook <name>] [--repo <path>…] [--problem] [--keep-branch]` | The whole run: intake, playbook, loop, PR (reviewed, merged, branch deleted) or report, record. `--keep-branch` keeps the branch after the merge. `<task>` is one or more GitHub issues (`#1234`, `owner/repo#1234` or a URL), a PR URL, or a quoted description. `--target` sets the primary repo's PR target. `/warstack:auto <run-id> [guidance]` resumes a run. | your session |
+| `/warstack:auto <task> [--target <branch>] [--playbook <name>] [--repo <path>…] [--problem] [--keep-branch]` | The whole run: intake, playbook, loop, PR (reviewed, merged, branch deleted) or report, record. `--keep-branch` keeps the branch after the merge. `<task>` is one or more issue references (`#1234`, `owner/repo#1234`, `PROJ-123` or a URL, whatever your tracker uses), a PR URL, or a quoted description. `--target` sets the primary repo's PR target. `/warstack:auto <run-id> [guidance]` resumes a run. | your session |
+| `/warstack:connect [show]` | Set up, or show, how warstack talks to your git host and issue tracker. Runs by itself the first time a project needs one. | your session |
 | `/warstack:afk <task> [; <task>…] [--hours <n>]` | For when you are away: asks every task's intake questions now, then runs the tasks one after another, headless, in a detached driver. | your session, then a driver |
 | `/warstack:implement` | Implement a plan or fix findings, then commit. | fresh subagent |
 | `/warstack:review` | Read-only review against the task and a fixed rubric. | fresh subagent |
@@ -37,7 +38,7 @@ auto picks one at intake and asks you to confirm it. Its steps become the run's 
 
 ## How a run works
 
-1. **Intake.** It fetches the issue, recalls earlier runs, and asks everything in one batch: the PR target branch (never guessed), the playbook, and gaps in the issue. It then creates a worktree per repo in `.claude/worktrees/<run-id>`, on `<scope>/<run-id>` (e.g. `fix/webapp-1234-login-crash`), forked from the target. A task that names an outcome rather than a change (a number to move, a "why" with no known cause) first goes through `problem-solving`: a quantified problem statement, an issue tree, tested hypotheses and one recommendation, which the plan then carries out. `--problem` forces it.
+1. **Intake.** The first time a project's git host or tracker has no connector yet, it asks which provider you use and works the commands out from your setup (see Connectors). It then fetches the issue, recalls earlier runs, and asks everything in one batch: the PR target branch (never guessed), the playbook, and gaps in the issue. It then creates a worktree per repo in `.claude/worktrees/<run-id>`, on `<scope>/<run-id>` (e.g. `fix/webapp-1234-login-crash`), forked from the target. A task that names an outcome rather than a change (a number to move, a "why" with no known cause) first goes through `problem-solving`: a quantified problem statement, an issue tree, tested hypotheses and one recommendation, which the plan then carries out. `--problem` forces it.
 2. **Loop, up to 3 iterations.** implement → review (a fresh reviewer every time) → testing. An analysis loops through analysis → a fact-checking review instead. It ends early once no blocking finding is left and no check fails. A risky diff gets a second reviewer on another model. After 3 iterations with issues still open, the run stops, pushes nothing, and reports.
 3. **Security gate.** Before anything ships, `security` audits the whole project: dependencies against public CVE records, secrets in the tree and history, code, config, CI. A high or critical threat the change introduces goes back into the loop to be fixed; if the budget runs out first, the run stops and pushes nothing. A new critical never ships unfixed; a new high can be accepted on resume with `accept S-<n> because <reason>`. Threats already in the code don't block: they are listed first in the report with a recommended fix. The PR lists only the new threats it ships. A secret the run committed is squashed out of its unpushed commits; one already pushed has leaked, so the run stops until you rotate it and resume with `S-<n> rotated`. Every threat is kept in `~/.warstack/repos/<repo>/security.md`, and open criticals show under "Needs you" in `/warstack:status`. `sh skills/security/security-test.sh` checks the skill against a fixture repo with planted threats (real `claude`, takes minutes).
 4. **Ship or deliver.** For a code change, it pushes and opens a draft PR of at most 5 lines, then watches CI and fixes failures its change caused. For a question or an analysis, it delivers the answer or report.
@@ -90,15 +91,21 @@ In your repos it writes only three things: its worktrees under `.claude/worktree
 ## Requirements
 
 - **Claude Code 2.1.218 or later.** warstack relies on forked skills that return their result.
-- **GitHub only**, for repos and issues, with the `gh` CLI signed in. Other hosts (Bitbucket, GitLab…) and trackers (Jira…) are not supported. CI means GitHub Actions: a repo without `.github/workflows/` runs with no CI.
+- **A git host and, if different, an issue tracker, reachable from your machine** through a signed-in CLI (`gh`, `glab`, `bb`, `az`, `jira`…) or an MCP server already connected to Claude Code. warstack asks once which ones you use (see Connectors). A repo without CI runs with no CI.
 - **On Windows, Git for Windows**: warstack's commands run in Git Bash. iOS checks need a Mac, so on Windows they show as Not run.
 - **Permissions:**
   - Run in **auto mode** (the default for interactive sessions since 2.1.283).
-  - Allow rules cover the commands a run uses, e.g. `Bash(git *)`, `Bash(npx playwright *)`, `Bash(xcrun simctl *)`, `Bash(adb *)`, `Bash(gh pr *)`, `Bash(gh api *)` (review comments and merge).
+  - Allow rules cover the commands a run uses, e.g. `Bash(git *)`, `Bash(npx playwright *)`, `Bash(xcrun simctl *)`, `Bash(adb *)`, and your connector's CLI or MCP tools, e.g. `Bash(gh pr *)`, `Bash(gh api *)` (review comments and merge).
   - `.git/` stays protected: the one exclude line per repo gets approved at intake, the first time that repo is used.
 - **Optional:**
   - the mobile-mcp plugin, for mobile e2e without Maestro flows;
   - Maestro, Xcode, the Android SDK, Docker, Node.
+
+## Connectors
+
+warstack knows no git provider by heart. A connector (`~/.warstack/connectors/<id>.conf`) maps a small, fixed set of operations (read an issue, open a draft PR, watch CI, post a review, resolve a thread, merge…) to the commands or MCP tools of one provider. The first time a project needs one, `/warstack:connect` asks which host and tracker you use, looks at your setup (CLIs on the PATH, MCP tools in the session, the names of token variables, never their values), drafts the mapping from the tool's own `--help`, proves the reads on a real issue and PR, and saves it once you confirm. Different providers for code and issues (Bitbucket plus Jira, GitHub plus Linear) are two connectors. GitHub through `gh` ships as the reference. The format is in `docs/connectors.md`.
+
+The guard enforces the safety rules through the connectors, so every provider gets the protection GitHub does.
 
 ## Limits and the harness
 
@@ -110,12 +117,13 @@ Inside a run's worktree, a hook (`hooks/guard.sh`) checks every shell command, f
 - a push whose commits add a `.env` or key file, or a line that looks like an AWS, GitHub, Slack, Atlassian, Google or Anthropic token;
 - `git push` with `--force`, `--mirror`, `--all`, a `+` or `:` refspec, or aimed at a repo's target branch; `--delete` of anything but the run's own branch after its PR merged, and of that too with `--keep-branch`;
 - `--no-verify`, `core.hooksPath` and `HUSKY=0`, so your repo's hooks always run;
-- `gh pr merge` of any PR but the run's own (by its URL), or with `--admin` or `--delete-branch` (the branch is deleted with `git push origin --delete` instead); `gh pr close`, `comment` and `review`; `gh pr create` without `--draft`; `gh api` writes other than PR review comments, replies and `resolveReviewThread`; `gh release`;
-- `gh issue` writes (`comment`, `close`, `edit`, …);
+- any call to a connector's CLI or MCP tools that is not one of its confirmed operations, so closing, commenting outside a review, releasing and every issue write stay out;
+- a merge, readying, edit, review, reply or thread resolution on any PR but the run's own, a merge that bypasses the target's rules or deletes the branch (the branch is deleted with `git push origin --delete` instead), and a PR opened without the host's draft flag;
+- an edit of `~/.warstack/connectors` by a run;
 - file writes outside the run's worktrees, `~/.warstack` and the session's temp folders;
 - the Claude in Chrome tools.
 
-It appends every call, and each denial with its rule id, to the run's `audit.log`. The report lists denials under Attention and ends with a Record block (owner, duration, iterations, questions, findings, failed checks, denials), and `/warstack:status` sums up attempts and catches across runs. Outside a run's worktree the hook exits at once, so your other sessions are untouched. `sh hooks/guard-test.sh` runs the guard against 128 inputs it must deny or allow, in a throwaway HOME. `/warstack:auto` and `/warstack:ship` also carry `disallowed-tools` for force-pushes, `gh pr merge --admin` and `--delete-branch`, and `gh issue` writes, which hold before a run enters its worktree.
+It appends every call, and each denial with its rule id, to the run's `audit.log`. The report lists denials under Attention and ends with a Record block (owner, duration, iterations, questions, findings, failed checks, denials), and `/warstack:status` sums up attempts and catches across runs. Outside a run's worktree the hook exits at once, so your other sessions are untouched. `sh hooks/guard-test.sh` runs the guard against 158 inputs it must deny or allow, in a throwaway HOME. `/warstack:auto` and `/warstack:ship` also carry `disallowed-tools` for force-pushes and, for GitHub, `gh` merge bypasses and issue writes, which hold before a run enters its worktree.
 
 The guard is a signal inside the session, not a boundary. The boundaries are your repo's branch permissions and required CI, and the identity the session runs under: warstack composes with Claude Code's sandbox and with a devcontainer, and adds the git-level rules those cannot express. A repo whose target has no CI is still merged once review is clean, and flagged under Attention.
 

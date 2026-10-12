@@ -38,8 +38,8 @@ Done when: every queued run is `parked` with no open question, and every task le
 What a headless run would fail on at 3am, settled now:
 
 1. **Exclude line** (conventions → Commands), once per repo. `.git/` is protected, and a headless run cannot get that approval.
-2. **Access.** `gh auth status`: warstack supports GitHub only, for repos and issues. A failure is the user's to fix now; nothing starts without it.
-3. **Permissions.** The driver runs `claude -p --permission-mode auto`: a call the classifier refuses is denied, not asked. From repo memory (`profile.md`: Bootstrap, test and e2e commands), plus `gh pr *` and `gh api *` (ready, review comments and merge), list the commands no allow rule in `~/.claude/settings.json` or the repo's `.claude/settings*.json` covers, and offer the rules that would. Without them, a run's PR stays open and unmerged. Add only the ones the user accepts.
+2. **Connectors.** Every task's repos and tracker need a confirmed connector (`${CLAUDE_PLUGIN_ROOT}/skills/connect/SKILL.md`): set up any missing one now, since a headless run cannot. Then run each one's `auth.check`. A failure is the user's to fix now; nothing starts without it.
+3. **Permissions.** The driver runs `claude -p --permission-mode auto`: a call the classifier refuses is denied, not asked. From repo memory (`profile.md`: Bootstrap, test and e2e commands), plus each connector's tool (`Bash(<tool> *)`, or its MCP tools) for ready, review comments and merge, list the commands no allow rule in `~/.claude/settings.json` or the repo's `.claude/settings*.json` covers, and offer the rules that would. Without them, a run's PR stays open and unmerged. Add only the ones the user accepts.
 4. **Power.** On macOS, the driver holds `caffeinate -i`, which does not keep a Mac with its lid closed awake on battery: when `pmset -g batt` says "Battery Power", tell the user to plug in. Elsewhere, tell them the machine must not suspend.
 
 Done when: every repo has its exclude line, every service answers, and the user has seen the uncovered commands.

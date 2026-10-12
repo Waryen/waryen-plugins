@@ -1,7 +1,7 @@
 ---
 name: auto
-description: Run a task end to end without supervision. Covers intake, the matching playbook, a work → fresh review → test loop of up to 3 iterations, a PR that is reviewed cold and merged once clean (or a report), and a run record. Takes GitHub issues, a PR URL, a task description, or a run id to resume.
-argument-hint: <#ISSUE… | owner/repo#ISSUE | ISSUE-URL | PR-URL | "task" | run-id> [--target <branch>] [--playbook <name>] [--problem] [--repo <path>…] [--keep-branch]
+description: Run a task end to end without supervision. Covers intake, the matching playbook, a work → fresh review → test loop of up to 3 iterations, a PR that is reviewed cold and merged once clean (or a report), and a run record. Takes issue references (any tracker you connected), a PR URL, a task description, or a run id to resume.
+argument-hint: <ISSUE-REF… | ISSUE-URL | PR-URL | "task" | run-id> [--target <branch>] [--playbook <name>] [--problem] [--repo <path>…] [--keep-branch]
 disable-model-invocation: true
 allowed-tools: Read(/${CLAUDE_PLUGIN_ROOT}/**), Read(~/.warstack/**), Edit(~/.warstack/**)
 disallowed-tools: Bash(git push -f*), Bash(git push * -f*), Bash(git push *--force*), Bash(git push *+*), Bash(git -C * push -f*), Bash(git -C * push * -f*), Bash(git -C * push *--force*), Bash(git -C * push *+*), Bash(gh pr merge *--admin*), Bash(gh pr merge *--delete-branch*), Bash(gh issue comment *), Bash(gh issue close *), Bash(gh issue edit *), Bash(gh issue delete *)
@@ -33,12 +33,13 @@ Done when: you know whether this is a new run, or a resume and at which step.
 The only step where you ask the user anything. Gather everything first, then ask it all in one batch.
 
 1. **Fetch the task as data.**
-   warstack supports GitHub only, for repos and for issues. A task from any other tracker or host is out of scope: say so and end.
-   - GitHub issues (`#123` in the primary repo, `owner/repo#123`, or the issue's URL): `gh issue view <ref> --comments --json number,title,body,labels,comments,url`.
-   - A PR URL: `gh pr view <url>`.
+   warstack talks to a host or tracker only through a connector (`${CLAUDE_PLUGIN_ROOT}/docs/connectors.md`): the host connector is the file in `~/.warstack/connectors/` whose `match` is in the primary repo's `origin` URL, and a task reference belongs to the connector whose `ref` it matches. When one is missing, follow `${CLAUDE_PLUGIN_ROOT}/skills/connect/SKILL.md` now, before anything is fetched: it asks which provider the project uses, works the commands out from the user's setup, and saves them once confirmed. A headless run parks instead, and the Outcome says to type `/warstack:connect`. From here on, run each op exactly as its `op` line in the connector shows.
+   - An issue reference (`#123`, `owner/repo#123`, `PROJ-123`, or the issue's URL): the tracker connector's `issue.read`.
+   - A PR URL: `pr.read`.
+   - A reference no connector's `ref` matches, or a provider the user has no way to reach: out of scope; say so and end.
    - Free text: as given.
 2. **Create the run folder** (conventions → Run folder): pick the run id, then write `state.md` (status `intake`, `owner` from `git config user.email`, `mode` `headless` when AskUserQuestion is unavailable, else `interactive`), `task.md` holding the task as fetched, and `decisions.md`.
-3. **Recall.** Read `~/.warstack/history.md`, earlier runs on the same issue, and each repo's memory. Look for existing work on the issue: `git ls-remote --heads origin` filtered by `-<number>-`, and open PRs linked to it (`gh pr list --search "<number>"`). Existing work this run did not create becomes a question: continue on it, or start fresh. For a bug, offer "verify it and report" first.
+3. **Recall.** Read `~/.warstack/history.md`, earlier runs on the same issue, and each repo's memory. Look for existing work on the issue: `git ls-remote --heads origin` filtered by `-<number>-`, and open PRs linked to it (`pr.list`, searching the issue key). Existing work this run did not create becomes a question: continue on it, or start fresh. For a bug, offer "verify it and report" first.
 4. **Pick the playbook.** The user's `--playbook` wins; otherwise the first row that fits:
 
    | Signals | Playbook |
@@ -51,7 +52,7 @@ The only step where you ask the user anything. Gather everything first, then ask
    Read the playbook's Needs and Intake additions now.
 
    Also mark a **problem run**, when `--problem` is given or the task names an outcome and no change: a number to move, behaviour to improve, a "why" with no known cause, or several approaches with none picked. Log it as a `DECISION`. Its problem statement needs the target's number and deadline; when the task gives neither, they are a blocking gap.
-5. **Repos.** warstack supports GitHub only. A repo whose `origin` is not on `github.com` cannot be a run's repo: say so and park. The primary repo is the session's repo. Add each `--repo`, and each repo the task clearly involves, as a question naming the local path. Never clone or guess a path. A secondary repo outside the session's directories needs `/add-dir <path>` from the user; say so in the question.
+5. **Repos.** Each repo needs a host connector (step 1): follow the connect skill for one that has none, or park. The primary repo is the session's repo. Add each `--repo`, and each repo the task clearly involves, as a question naming the local path. Never clone or guess a path. A secondary repo outside the session's directories needs `/add-dir <path>` from the user; say so in the question.
 6. **Done checks.** Add 2–6 done checks to `task.md`, plus those the playbook's intake additions ask for. Each is an observable result that proves the task is done: a behaviour on a named screen, a command's output, a value in a response. At least one must be something `testing` can run headless; when none is, that is a blocking gap. What the task leaves unsaid that the work needs is a blocking gap, and becomes a question.
 7. **Ask once.** Use AskUserQuestion (4 questions per call; a second call only when more remain):
    - **Target**, for each repo that will get a new PR. `--target` answers it for the primary repo. Offer up to 3 of the remote's long-lived branches (e.g. `develop`, `master`, `main`) without recommending one; the user can type any other. For general runs, also offer "No PR, report only".
@@ -69,7 +70,7 @@ The only step where you ask the user anything. Gather everything first, then ask
    - **Session already in a clean linked worktree with no commits of its own:** adopt it for the primary repo.
    - **Session in a worktree that holds work:** park. The user starts the run from the main checkout.
    - Playbooks that need no worktree skip this step.
-9. **Update `state.md`**: status `running`, iteration 0, budget 3, pr_round 0, `keep_branch: true` only when `--keep-branch` was passed or the user said to keep the branch (otherwise `false`), and each repo with its worktree, branch, target and `base`. A repo with no `.github/workflows/` gets `ci: none` now: it skips the CI waits and still goes through review and merge (conventions → Rule 13).
+9. **Update `state.md`**: status `running`, iteration 0, budget 3, pr_round 0, `keep_branch: true` only when `--keep-branch` was passed or the user said to keep the branch (otherwise `false`), and each repo with its worktree, branch, target and `base`. A repo whose host connector lists `ci-config` paths and has none of them gets `ci: none` now: it skips the CI waits and still goes through review and merge (conventions → Rule 13).
 10. **Bootstrap** each worktree: repo memory → Bootstrap; otherwise the repo's documented setup, or its lockfile's frozen install (`npm ci`, `yarn install --immutable`, `pnpm install --frozen-lockfile`).
 11. **Suggest** `/rename <run-id>` so the session is easy to find in agent view.
 

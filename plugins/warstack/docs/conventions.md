@@ -7,8 +7,10 @@ Shared by every warstack skill and playbook. `<TS>` means `~/.warstack`, warstac
 | Word | Meaning |
 |---|---|
 | run | One task driven end to end, with a run id and a run folder. |
-| run id | `<repo>-<number>-<slug>` for a GitHub issue (the first issue, for a group; `<repo>` is the repo's name), `<yyyymmdd>-<slug>` for free text. `<slug>`: 2–5 lowercase words from the task, joined by `-`. An id already used by another run gets `-2`, `-3`. |
+| run id | `<repo>-<key>-<slug>` for a tracker issue (the first issue, for a group; `<repo>` is the repo's name, `<key>` the issue's number or key, lowercased: `1291`, `proj-123`), `<yyyymmdd>-<slug>` for free text. `<slug>`: 2–5 lowercase words from the task, joined by `-`. An id already used by another run gets `-2`, `-3`. |
 | run folder | `<TS>/runs/<run-id>/`. |
+| connector | How warstack talks to one git host or tracker: `<TS>/connectors/<id>.conf`, shaped by [connectors.md](connectors.md). |
+| op | One operation a connector maps (`pr.merge`, `issue.read`…). |
 | repo key | A repo's identity in memory, derived from its `origin` URL (Commands). |
 | repo memory | `<TS>/repos/<repo-key>/`, shaped by [repo-memory.md](repo-memory.md). |
 | target | The branch a repo's PR merges into. The user gives it; nothing infers it. |
@@ -181,8 +183,8 @@ echo "- <yyyy-mm-dd> · <run-id> · <playbook> · <outcome> · <iterations> iter
    - once CI is green (or with no CI), mark its own PRs ready, post review comments on them, reply to and resolve their threads, and merge them (ship → steps 7–9), never with `--admin` or any other bypass of the target's rules;
    - delete its own branch on the remote once its PR merged, unless `keep_branch: true`;
    - re-run its own CI pipeline once for a flaky failure;
-   - read GitHub issues;
-   - close the run's issue through its merged PR (`Closes …` in the PR description).
+   - read issues, through the tracker connector's `issue.read`;
+   - close the run's issue through its merged PR (the connector's `link` text in the PR description).
 
    Everything else outward stays with the user: merging a PR the run did not open, force-pushing, pushing to a target, deleting any other remote branch, editing or commenting on issues, commenting anywhere else, messaging anyone.
 4. **Repo writes** stay inside the run's worktrees, plus the exclude line. Stage explicit paths. warstack's own files stay out of every commit.
@@ -193,5 +195,5 @@ echo "- <yyyy-mm-dd> · <run-id> · <playbook> · <outcome> · <iterations> iter
 9. **Evidence or label.** Every claim carries evidence. A claim without evidence is labeled hypothesis, with what would settle it. Report only checks that actually ran.
 10. **Scope.** The task is the boundary. Problems found outside it become follow-ups in the report.
 11. **Protected paths.** `<TS>` sits outside Claude Code's protected paths, so each skill's `allowed-tools` pre-approves reads and writes there with the file tools. `.git/` is protected: Claude Code never auto-approves writes there (manual mode prompts, auto mode asks its classifier). The exclude line is warstack's only write there, done at intake, once per repo, while the user is present.
-12. **Harness.** Inside a run's worktree, `hooks/guard.sh` runs before every Bash, file-write, Read and MCP call and denies what Rules 2 to 6 forbid: reads of credential stores and of `.env` and key files outside the worktrees, a push whose diff adds a credential file or a known token format, force-pushes and pushes to a target, `--no-verify`, non-draft PRs, a merge of a PR that is not the run's or that bypasses the target's rules, deleting a branch other than the run's own merged one (or any, with `keep_branch: true`), `gh api` writes other than PR review comments and thread resolutions, file writes outside the run's worktrees and `<TS>`, and Claude in Chrome. It appends every such call, and each denial, to `<run folder>/audit.log`. A denial is final: log it as a `DECISION` and continue without that action. The guard is a signal inside the session, not a boundary: the boundaries are the repo's branch permissions and required CI, and the identity the session runs under. `hooks/guard-test.sh` is its evidence; it passes before any change to the guard ships.
+12. **Harness.** Inside a run's worktree, `hooks/guard.sh` runs before every Bash, file-write, Read and MCP call and denies what Rules 2 to 6 forbid: reads of credential stores and of `.env` and key files outside the worktrees, a push whose diff adds a credential file or a known token format, force-pushes and pushes to a target, `--no-verify`, non-draft PRs, a merge of a PR that is not the run's or that bypasses the target's rules, deleting a branch other than the run's own merged one (or any, with `keep_branch: true`), every call to a connector's CLI or MCP tools that is not one of its confirmed operations (the writes among them only on the run's own PR, thread resolutions only after the host confirms the thread is on it), file writes outside the run's worktrees and `<TS>` (and any to `<TS>/connectors`), and Claude in Chrome. It appends every such call, and each denial, to `<run folder>/audit.log`. A denial is final: log it as a `DECISION` and continue without that action. The guard is a signal inside the session, not a boundary: the boundaries are the repo's branch permissions and required CI, and the identity the session runs under. `hooks/guard-test.sh` is its evidence; it passes before any change to the guard ships.
 13. **No CI.** A repo whose target has no CI has no merge gate but review and the run's own tests. Its run skips the CI waits and still goes through the final review and merge, and the report says so under Attention.

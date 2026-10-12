@@ -34,16 +34,20 @@ grep -qE '^status: *(intake|running)( |$)' "$state" || exit 0
 audit=$ts/runs/$run/audit.log
 root=${cwd%%/.claude/worktrees/*}/.claude/worktrees/$run
 home=$(lc "$(norm "$HOME")")
+# Connectors (docs/connectors.md): the user's confirmed ones, plus the bundled GitHub one unless the user has their own for gh.
+confs=$(set +f; for f in "$ts"/connectors/*.conf; do [ -f "$f" ] && echo "$f"; done)
+case "$confs" in *[!\ ]*) grep -qs '^tool: gh *$' $confs || confs="$confs
+$(dirname "$0")/../connectors/github.conf" ;; *) confs=$(dirname "$0")/../connectors/github.conf ;; esac
 
 tool=$(field tool_name)
 event=$(field hook_event_name)
 sid=$(field session_id | cut -c1-8); sid=${sid:--}
 
-# The Bash command up to its closing quote, with \n and \t as spaces.
+# The Bash command up to its closing quote, with \n as a separator and \t as a space.
 cmd=
 if [ "$tool" = Bash ]; then
   cmd=${input#*\"command\":}
-  if [ "$cmd" = "$input" ]; then cmd=; else cmd=$(printf '%s' "$cmd" | sed -E 's/^ *"(([^"\\]|\\.)*)".*/\1/; s/\\[nt]/ /g'); fi
+  if [ "$cmd" = "$input" ]; then cmd=; else cmd=$(printf '%s' "$cmd" | sed -E 's/^ *"(([^"\\]|\\.)*)".*/\1/; s/\\n/ ; /g; s/\\t/ /g'); fi
 fi
 
 if [ "$event" = PostToolUse ]; then
@@ -95,17 +99,6 @@ scan_push() {
   [ -z "$hit" ] || deny R2-push "secrets by name (Rule 2): $hit adds what looks like a credential value; keep the value in the secret file and reference it by name"
 }
 
-# Rule 3: merge only the run's own PR, by its URL, within the target's rules.
-check_merge() {
-  own=
-  for w in $cmd; do
-    case "$w" in --admin|--delete-branch|-[a-zA-Z]*d*) deny R3-merge "merge without --admin or --delete-branch: the target's rules hold, and the branch is deleted afterwards with git push origin --delete (Rule 3)" ;; esac
-    w=$(printf '%s' "$w" | tr -d "\\\\\"'")
-    for u in $(yaml pr); do [ "$w" = "$u" ] && own=1; done
-  done
-  [ -n "$own" ] || deny R3-merge "merge only the run's own PR, passed by the URL in state.md (Rule 3)"
-}
-
 # Rule 3: once merged, the run deletes its own branch, unless keep_branch is set.
 # Only the exact form `git [-C <dir>] push origin --delete <branch>`, so nothing rides along.
 check_delete() {
@@ -128,35 +121,118 @@ check_delete() {
   [ -n "${repo#* }" ] || deny R3-push "delete the branch only after this repo's PR merged (Rule 3)"
 }
 
-# own_pr <url>: the URL is one of the run's PRs, in state.md.
-own_pr() { for u in $(yaml pr); do [ "$(lc "$1")" = "$(lc "$u")" ] && return 0; done; return 1; }
-
-# Rule 3: gh api writes are review comments, replies and thread resolutions on the run's own PRs.
-check_api() {
-  case " $cmd " in
-    *" graphql "*)
-      case "$cmd" in *mutation*) ;; *) return ;; esac
-      case "$cmd" in *resolveReviewThread*) ;; *) deny R3-outward "gh api graphql mutations: only resolveReviewThread (Rule 3)" ;; esac
-      [ "$(printf '%s' "$cmd" | grep -o 'input:' | wc -l)" -eq 1 ] || deny R3-outward "one resolveReviewThread per mutation, nothing else (Rule 3)"
-      # A thread id is opaque: ask GitHub which PR it belongs to. No answer means no.
-      tid=$(printf '%s' "$cmd" | grep -oE 'threadId: *\\?"[^"\\]+' | head -1 | sed 's/.*"//')
-      [ -n "$tid" ] && url=$(gh api graphql -f query="query{node(id:\"$tid\"){... on PullRequestReviewThread{pullRequest{url}}}}" --jq .data.node.pullRequest.url 2>/dev/null) && own_pr "$url" ||
-        deny R3-outward "resolve threads only on the run's own PR (Rule 3): could not confirm thread ${tid:-?} belongs to it"
-      return ;;
-    *" -X PUT "*|*" -X PATCH "*|*" -X DELETE "*|*" --method PUT "*|*" --method PATCH "*|*" --method DELETE "*)
-      deny R3-outward "gh api writes only add review comments (Rule 3)" ;;
-  esac
-  for w in $cmd; do
-    p=${w#/}
-    case "$p" in
-      repos/*/pulls/[0-9]*/reviews|repos/*/pulls/[0-9]*/comments|repos/*/pulls/[0-9]*/comments/[0-9]*/replies)
-        # repos/<o>/<r>/pulls/<n>/… is the PR https://github.com/<o>/<r>/pull/<n>.
-        n=${p#repos/*/*/pulls/}; n=${n%%/*}; or=${p#repos/}; or=${or%%/pulls/*}
-        own_pr "https://github.com/$or/pull/$n" && return
-        deny R3-outward "gh api writes go only to the run's own PR (Rule 3): $or#$n is not in state.md" ;;
+# ---- Rule 3 through connectors (docs/connectors.md) ----
+# Everything a connector's CLI or MCP tools do goes through an operation its conf maps: a call that matches
+# none is denied, and the writes carry the rules of their kind (apply). A template is a token list: its
+# leading words must equal the call's, every other fixed token must appear in it, <name> is a free value.
+cget() { sed -n "s/^$2: *//p" "$1" | head -1 | sed 's/ *$//'; }
+optget() { sed -n "s/^opt\\.$2\\.$3: *//p" "$1" | head -1; }
+# A token as an ERE: literals escaped, <thread> captured, any other <name> free.
+tok_re() { printf '%s' "$1" | sed 's/[][\\.*^$(){}?+|@]/\\&/g; s/<thread>/(.*)/; s/<[a-z]*>/.*/g'; }
+nth() { n=$1; shift; [ "$n" -le $# ] && eval "printf '%s' \"\${$n}\""; }
+match() { # $1 template, $2 call, both with quotes stripped
+  lead=1; i=0
+  for t in $1; do
+    i=$((i + 1))
+    if [ $lead = 1 ]; then
+      case "$t" in -*|*'<'*) lead=0 ;; *) [ "$t" = "$(nth $i $2)" ] || return 1; continue ;; esac
+    fi
+    case "$t" in '<'*'>') continue ;; esac
+    re=$(tok_re "$t"); found=
+    for w in $2; do printf '%s\n' "$w" | grep -Eq "^$re\$" && { found=1; break; }; done
+    [ -n "$found" ] || return 1
+  done
+}
+# The value the call holds where the template has <thread>.
+capture() {
+  i=0
+  for t in $1; do
+    i=$((i + 1))
+    case "$t" in
+      '<thread>') nth $i $2; return ;;
+      *'<thread>'*) re=$(tok_re "$t"); for w in $2; do v=$(printf '%s\n' "$w" | sed -nE "s@^$re\$@\1@p"); [ -n "$v" ] && { printf '%s' "$v"; return; }; done ;;
     esac
   done
-  deny R3-outward "gh api writes are limited to PR review comments and replies (Rule 3)"
+}
+# own_pr <url>: the URL is one of the run's PRs, in state.md.
+own_pr() { for u in $(yaml pr); do [ "$(lc "$1")" = "$(lc "$u")" ] && return 0; done; return 1; }
+# own_text <text>: the text names one of the run's PRs, by its URL, or by its repo path and number.
+own_text() {
+  t=$(lc "$1")
+  for u in $(yaml pr); do
+    u=$(lc "$u"); case "$t" in *"$u"*) return 0 ;; esac
+    n=${u##*/}; rp=$(printf '%s' "${u#*://*/}" | cut -d/ -f1,2)
+    printf '%s' "$t" | grep -Eq "(^|[^0-9])$n([^0-9]|\$)" || continue
+    case "$t" in *"$rp"*) return 0 ;; esac
+    case "$t" in *\"${rp%/*}\"*\"${rp#*/}\"*|*\"${rp#*/}\"*\"${rp%/*}\"*) return 0 ;; esac
+  done
+  return 1
+}
+# apply <conf> <op> <call> <raw template>: what the kind of op demands.
+apply() {
+  f=$1; op=$2; inv=$3
+  case "$op" in pr.create) rid=R3-draft ;; pr.merge) rid=R3-merge ;; *) rid=R3-outward ;; esac
+  flat=$(printf '%s' "$inv" | tr -d ' ')
+  for r in $(optget "$f" "$op" require); do
+    case "$flat" in *"$r"*) ;; *) deny $rid "$op needs $r (Rule 3)" ;; esac
+  done
+  for w in $inv; do
+    for x in $(optget "$f" "$op" forbid); do
+      [ "$w" = "$x" ] && deny $rid "$op never takes $x (Rule 3)"
+      case "$x:$w" in -[a-zA-Z]:-[a-zA-Z]*) case "$w" in *"${x#-}"*) deny $rid "$op never takes $x (Rule 3)" ;; esac ;; esac
+    done
+  done
+  case "$op" in
+    pr.create|pr.edit|pr.ready|pr.merge|review.post|thread.reply|thread.resolve|ci.rerun) ;;
+    *) prev=
+       for w in $inv; do
+         case "$prev:$w" in -X:GET|--method:GET) ;; -X:*|--method:*) deny $rid "$op only reads (Rule 3)" ;; esac
+         case "$w" in -X?*|--method=*|--input) deny $rid "$op only reads (Rule 3)" ;; esac
+         prev=$w
+       done ;;
+  esac
+  case "$op" in
+    pr.edit|pr.ready|pr.merge|review.post|thread.reply)
+      own_text "$inv" || deny $rid "$op acts only on the run's own PR, passed by its URL (Rule 3)" ;;
+    thread.resolve)
+      tid=$(capture "$(printf '%s' "$4" | tr -d "\\\\\"'")" "$inv")
+      owner=$(sed -n 's/^op\.thread\.owner: *//p' "$f" | head -1)
+      # A thread id is opaque: ask the host which PR it belongs to. No answer means no.
+      printf '%s' "$tid" | grep -Eq '^[A-Za-z0-9_=-]+$' && [ -n "$owner" ] &&
+        url=$(sh -c "$(printf '%s' "$owner" | sed "s@<thread>@$tid@g")" 2>/dev/null) && own_pr "$url" ||
+        deny R3-outward "resolve threads only on the run's own PR (Rule 3): could not confirm thread ${tid:-?} belongs to it" ;;
+  esac
+}
+# run_op <what> <call> <conf>…: the call must match an op of one of the confs.
+run_op() {
+  what=$1; call=$2; shift 2
+  for f in "$@"; do
+    while IFS= read -r line; do
+      raw=${line#*: }; op=${line%%:*}; op=${op#op.}
+      match "$(printf '%s' "$raw" | tr -d "\\\\\"'")" "$call" && { apply "$f" "$op" "$call" "$raw"; return; }
+    done <<EOF
+$(grep -E '^op\.' "$f")
+EOF
+  done
+  deny R3-outward "outward actions (Rule 3): $what runs only through the operations its connector maps (docs/connectors.md); this call is none of them"
+}
+# A segment whose command word is a connector's CLI runs through that connector's ops.
+check_cli() {
+  segs=$(printf '%s\n' "$cmd" | awk '{ gsub(/&&|\|\||;|\||\$\(|`/, "\n"); print }')
+  while IFS= read -r seg; do
+    inv=; bin=
+    for w in $seg; do
+      if [ -z "$bin" ]; then case "$w" in *=*|sudo|command|exec|time|env|nohup) continue ;; esac; bin=${w##*/}; w=$bin; fi
+      inv="$inv $w"
+    done
+    [ -n "$bin" ] || continue
+    mine=
+    for f in $confs; do [ "$(cget "$f" via)" = cli ] && [ "$(cget "$f" tool)" = "$bin" ] && mine="$mine $f"; done
+    [ -n "$mine" ] || continue
+    run_op "$bin" "$(printf '%s' "$inv" | tr -d "\\\\\"'")" $mine
+  done <<EOF
+$segs
+EOF
 }
 
 # Rules 2, 3 and 5: credential stores, outward actions and hooks.
@@ -167,12 +243,8 @@ check_bash() {
   esac
   case " $cmd " in
     *" --no-verify "*|*core.hooksPath*|*HUSKY=0*) deny R5-hooks "hooks run (Rule 5): commit and push without --no-verify, core.hooksPath or HUSKY=0" ;;
-    *" gh pr merge "*) check_merge ;;
-    *" gh pr close "*|*" gh pr reopen "*|*" gh pr comment "*|*" gh pr review "*|*" gh pr lock "*|*" gh pr unlock "*|*" gh issue comment "*|*" gh issue close "*|*" gh issue reopen "*|*" gh issue edit "*|*" gh issue delete "*|*" gh release "*|*" gh repo delete "*)
-      deny R3-outward "outward actions (Rule 3): closing, commenting outside a review, and releasing stay with the user" ;;
-    *" gh pr create "*) case " $cmd " in *" --draft "*|*" -d "*) ;; *) deny R3-draft "every PR is a draft: add --draft" ;; esac ;;
-    *" gh api "*) case " $cmd " in *" -X "*|*" --method "*|*" -f "*|*" -F "*|*" --field "*|*" --raw-field "*|*" --input "*) check_api ;; esac ;;
   esac
+  check_cli
   case " $cmd " in *" push "*" --delete "*) check_delete; return ;; esac
   targets=$(yaml target)
   mode=; push=
@@ -195,6 +267,7 @@ check_path() {
   path=$(field file_path); [ -n "$path" ] || path=$(field notebook_path)
   path=$(norm "$path")
   case "$path" in /*) ;; *) return ;; esac
+  case "$(lc "$path")" in "$(lc "$(norm "$ts")")"/connectors/*) deny R4-path "connectors are the user's (Rule 4): a run never edits ~/.warstack/connectors" ;; esac
   inside "$(lc "$path")" || deny R4-path "repo writes stay inside the run's worktrees and ~/.warstack (Rule 4): $path is outside them"
 }
 
@@ -205,11 +278,17 @@ check_read() {
   secret_file "$(lc "$path")" && deny R2-store "secrets by name (Rule 2): $path holds credential values; use the secret's name and let the app read it"
 }
 
-# Rule 6: the user's own browser.
+# Rule 6: the user's own browser. Rule 3: the tools of an MCP connector.
 check_mcp() {
   case "$tool" in
     mcp__claude-in-chrome__*) deny R6-headless "runs are headless (Rule 6): the user's own browser stays out" ;;
   esac
+  mine=
+  for f in $confs; do
+    [ "$(cget "$f" via)" = mcp ] || continue
+    case "$tool" in "$(cget "$f" tool)"*) mine="$mine $f" ;; esac
+  done
+  [ -z "$mine" ] || run_op "$tool" "$tool $input" $mine
 }
 
 case "$tool" in

@@ -104,30 +104,95 @@ t 0 "gh pr ready"                            "$(bash "$CWD" PreToolUse 'gh pr re
 t 2 "gh pr comment"                          "$(bash "$CWD" PreToolUse 'gh pr comment 12 --body hi')"
 t 2 "gh pr create without draft"             "$(bash "$CWD" PreToolUse 'gh pr create --base develop --head feat/x --title t --body-file f')"
 t 0 "gh pr create --draft"                   "$(bash "$CWD" PreToolUse 'gh pr create --draft --base develop --head feat/x --title t --body-file f')"
-t 0 "gh pr edit"                             "$(bash "$CWD" PreToolUse 'gh pr edit 12 --body \"Merge after: x\"')"
+t 0 "gh pr edit own PR by URL"               "$(bash "$CWD" PreToolUse 'gh pr edit https://github.com/o/r/pull/12 --body-file f')"
+t 2 "gh pr edit by bare number"              "$(bash "$CWD" PreToolUse 'gh pr edit 12 --body-file f')"
+t 2 "gh pr edit other PR"                    "$(bash "$CWD" PreToolUse 'gh pr edit https://github.com/o/r/pull/99 --body-file f')"
+t 2 "gh pr ready other PR"                   "$(bash "$CWD" PreToolUse 'gh pr ready https://github.com/o/r/pull/99')"
 t 0 "gh pr checks"                           "$(bash "$CWD" PreToolUse 'gh pr checks feat/x')"
-t 0 "gh api read"                            "$(bash "$CWD" PreToolUse 'gh api repos/o/r/pulls/12')"
+t 2 "gh api read, not mapped"                "$(bash "$CWD" PreToolUse 'gh api repos/o/r/pulls/12')"
+t 0 "gh api file read"                       "$(bash "$CWD" PreToolUse 'gh api repos/o/r/contents/a.ts?ref=abc')"
+t 2 "gh api file read turned into a write"   "$(bash "$CWD" PreToolUse 'gh api -X DELETE repos/o/r/contents/a.ts?ref=abc')"
+t 2 "gh api file read, -XDELETE"             "$(bash "$CWD" PreToolUse 'gh api -XDELETE repos/o/r/contents/a.ts?ref=abc')"
+t 2 "gh api file read with --input"          "$(bash "$CWD" PreToolUse 'gh api repos/o/r/contents/a.ts?ref=abc --input f')"
 t 2 "gh api write"                           "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/issues/12/labels -f labels=x')"
 t 2 "gh api merge endpoint"                  "$(bash "$CWD" PreToolUse 'gh api -X PUT repos/o/r/pulls/12/merge')"
 t 2 "gh api edit comment"                    "$(bash "$CWD" PreToolUse 'gh api -X PATCH repos/o/r/pulls/comments/5 -f body=x')"
-t 2 "gh api graphql merge"                   "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:1}){clientMutationId}}'")"
-t 2 "gh api graphql resolve plus merge"      "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:1}){clientMutationId} mergePullRequest(input:{pullRequestId:1}){clientMutationId}}'")"
 t 0 "gh api review"                          "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/12/reviews --input /tmp/r.json')"
 t 2 "gh api review on another PR"            "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/99/reviews --input /tmp/r.json')"
 t 2 "gh api review, PR number prefix"        "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/123/reviews --input /tmp/r.json')"
 t 2 "gh api review on another repo"          "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/x/pulls/12/reviews --input /tmp/r.json')"
 t 2 "gh api reply on another PR"             "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/99/comments/5/replies -f body=x')"
-t 0 "gh api reply"                           "$(bash "$CWD" PreToolUse 'gh api -X POST /repos/o/r/pulls/12/comments/5/replies -f body=fixed')"
-t 0 "gh api graphql read"                    "$(bash "$CWD" PreToolUse "gh api graphql -f query='query{repository(owner:1){id}}'")"
-t 0 "gh api graphql resolve own thread"      "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\\\"T_OWN\\\"}){thread{isResolved}}}'")"
-t 2 "gh api graphql resolve other thread"    "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\\\"T_X\\\"}){thread{isResolved}}}'")"
-t 2 "gh api graphql resolve, lookup fails"   "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\\\"T_ERR\\\"}){thread{isResolved}}}'")"
-t 2 "gh api graphql resolve, no thread id"   "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:1}){thread{isResolved}}}'")"
-t 0 "gh issue view"                          "$(bash "$CWD" PreToolUse 'gh issue view 1291 --comments --json title,body')"
+t 0 "gh api reply"                           "$(bash "$CWD" PreToolUse 'gh api -X POST repos/o/r/pulls/12/comments/5/replies -f body=fixed')"
+t 0 "gh api graphql threads list"            "$(bash "$CWD" PreToolUse 'gh api graphql -f query=\"query{repository(owner:\\\"o\\\",name:\\\"r\\\"){pullRequest(number:12){reviewThreads(first:100){nodes{id isResolved path line comments(first:50){nodes{databaseId author{login} body}}}}}}}\"')"
+t 2 "gh api graphql read, not mapped"        "$(bash "$CWD" PreToolUse "gh api graphql -f query='query{repository(owner:1){id}}'")"
+RQ="query='mutation(\$id:ID!){resolveReviewThread(input:{threadId:\$id}){thread{isResolved}}}'"
+t 0 "gh api graphql resolve own thread"      "$(bash "$CWD" PreToolUse "gh api graphql -F id=T_OWN -f $RQ")"
+t 2 "gh api graphql resolve other thread"    "$(bash "$CWD" PreToolUse "gh api graphql -F id=T_X -f $RQ")"
+t 2 "gh api graphql resolve, lookup fails"   "$(bash "$CWD" PreToolUse "gh api graphql -F id=T_ERR -f $RQ")"
+t 2 "gh api graphql resolve, no thread id"   "$(bash "$CWD" PreToolUse "gh api graphql -f $RQ")"
+t 2 "gh api graphql resolve, id with shell"  "$(bash "$CWD" PreToolUse "gh api graphql -F id=T_OWN\;rm -f $RQ")"
+t 2 "gh api graphql merge"                   "$(bash "$CWD" PreToolUse "gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:1}){clientMutationId}}'")"
+t 2 "gh api graphql resolve plus merge"      "$(bash "$CWD" PreToolUse "gh api graphql -F id=T_OWN -f query='mutation(\$id:ID!){resolveReviewThread(input:{threadId:\$id}){thread{isResolved}} mergePullRequest(input:{pullRequestId:1}){clientMutationId}}'")"
+t 0 "gh issue view"                          "$(bash "$CWD" PreToolUse 'gh issue view 1291 --comments --json number,title,body,labels,comments,url')"
+t 2 "gh issue view, other fields"            "$(bash "$CWD" PreToolUse 'gh issue view 1291 --comments --json title,body')"
+t 2 "gh in a chain"                          "$(bash "$CWD" PreToolUse 'git fetch origin && gh issue close 1291')"
+t 2 "gh on a second line"                    "$(bash "$CWD" PreToolUse 'git status\ngh pr close 12')"
+t 2 "gh in a command substitution"           "$(bash "$CWD" PreToolUse 'echo $(gh release create v1)')"
+t 2 "gh behind an env assignment"            "$(bash "$CWD" PreToolUse 'GH_TOKEN=x gh pr close 12')"
+t 0 "gh only as an argument"                 "$(bash "$CWD" PreToolUse 'grep -rn gh src && echo gh issue close')"
 t 2 "gh issue comment"                       "$(bash "$CWD" PreToolUse 'gh issue comment 1291 --body hi')"
 t 2 "gh issue close"                         "$(bash "$CWD" PreToolUse 'gh issue close 1291')"
 t 2 "gh release"                             "$(bash "$CWD" PreToolUse 'gh release create v1')"
 t 0 "npm test"                               "$(bash "$CWD" PreToolUse 'npm test -- --watch=false')"
+
+echo "# connectors: another host, a tracker and an MCP"
+mkdir -p "$HOME/.warstack/connectors"
+cat > "$HOME/.warstack/connectors/bitbucket.conf" <<'CONF'
+match: bitbucket.org
+via: cli
+tool: bb
+op.pr.read: bb pr view <pr>
+op.pr.create: bb pr create --title "<title>" --source <head> --destination <base>
+opt.pr.create.require: --draft
+op.pr.merge: bb pr merge <pr>
+opt.pr.merge.forbid: --force
+CONF
+cat > "$HOME/.warstack/connectors/jira.conf" <<'CONF'
+via: mcp
+tool: mcp__jira__
+op.issue.read: mcp__jira__get_issue
+CONF
+cat > "$HOME/.warstack/connectors/forge.conf" <<'CONF'
+via: mcp
+tool: mcp__forge__
+op.pr.merge: mcp__forge__merge_pr
+op.pr.create: mcp__forge__create_pr
+opt.pr.create.require: "draft":true
+CONF
+t 2 "bundled github stays beside user connectors" "$(bash "$CWD" PreToolUse 'gh pr close 12')"
+t 0 "bundled github read beside user connectors"  "$(bash "$CWD" PreToolUse 'gh pr view https://github.com/o/r/pull/12 --json title,body,baseRefName,headRefOid,files')"
+printf 'via: cli\ntool: gh\nop.pr.read: gh pr view <pr>\n' > "$HOME/.warstack/connectors/mygh.conf"
+t 2 "a user's gh connector replaces the bundled one" "$(bash "$CWD" PreToolUse 'gh pr merge https://github.com/o/r/pull/12 --squash')"
+t 0 "a user's gh connector still maps its ops"      "$(bash "$CWD" PreToolUse 'gh pr view https://github.com/o/r/pull/12')"
+rm "$HOME/.warstack/connectors/mygh.conf"
+t 0 "bb read"                                "$(bash "$CWD" PreToolUse 'bb pr view 12')"
+t 2 "bb unmapped write"                      "$(bash "$CWD" PreToolUse 'bb pr decline 12')"
+t 2 "bb create without draft"                "$(bash "$CWD" PreToolUse 'bb pr create --title t --source a --destination b')"
+t 0 "bb create draft"                        "$(bash "$CWD" PreToolUse 'bb pr create --draft --title t --source a --destination b')"
+t 0 "bb merge own PR"                        "$(bash "$CWD" PreToolUse 'bb pr merge https://github.com/o/r/pull/12')"
+t 2 "bb merge other PR"                      "$(bash "$CWD" PreToolUse 'bb pr merge https://github.com/o/r/pull/99')"
+t 2 "bb merge forbidden flag"                "$(bash "$CWD" PreToolUse 'bb pr merge https://github.com/o/r/pull/12 --force')"
+t 2 "jira read tool allowed, write tool not" "$(mcp mcp__jira__add_comment '{"issue":"A-1"}')"
+t 0 "jira read tool"                         "$(mcp mcp__jira__get_issue '{"issue":"A-1"}')"
+t 0 "mcp tools outside any connector"        "$(mcp mcp__other__anything '{}')"
+t 0 "forge merge own PR by url"              "$(mcp mcp__forge__merge_pr '{"url":"https://github.com/o/r/pull/12"}')"
+t 0 "forge merge own PR by owner, repo, number" "$(mcp mcp__forge__merge_pr '{"owner":"o","repo":"r","number":12}')"
+t 2 "forge merge other PR"                   "$(mcp mcp__forge__merge_pr '{"owner":"o","repo":"r","number":99}')"
+t 2 "forge merge, wrong repo"                "$(mcp mcp__forge__merge_pr '{"owner":"o","repo":"x","number":12}')"
+t 2 "forge create not draft"                 "$(mcp mcp__forge__create_pr '{"title":"t","draft":false}')"
+t 0 "forge create draft"                     "$(mcp mcp__forge__create_pr '{"title":"t", "draft": true}')"
+t 2 "edit a connector from a run"            "$(edit "$CWD" "$HOME/.warstack/connectors/bitbucket.conf")"
+rm -r "$HOME/.warstack/connectors"
 
 echo "# rule 4: writes"
 t 0 "edit inside worktree"                   "$(edit "$CWD" "$CWD/src/a.ts")"
